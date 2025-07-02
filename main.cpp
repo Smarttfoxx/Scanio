@@ -19,8 +19,6 @@ int main(int argc, char* argv[])
     int service_timeout_sec = 1;
     int port_amount = 0;
 
-    bool bShow_only_open_port = false;
-    bool bShow_closed_filtered = false;
     bool bFind_service = false;
     bool bIs_up = false;
 
@@ -120,11 +118,6 @@ int main(int argc, char* argv[])
         } else if (!bIs_up) {
             std::cerr << "No open ports were found, is the host online?\n";
             return 1;
-        }
-
-        if (bShow_closed_filtered) 
-        {
-            std::cerr << "Port " << port << " is CLOSED or FILTERED\n";
         }
     }
 
