@@ -112,6 +112,7 @@ inline std::string ServiceBannerGrabber(const std::string& ip, int port, int tim
 }
 
 inline bool IsPortOpen(const std::string& ip, int port, int timeout_sec) {
+
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return false;
 
@@ -155,8 +156,8 @@ bool IsHostUpICMP(const std::string& ip) {
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
 
     if (sockfd < 0) {
-        perror("socket");
-        return false;
+        std::cout << "[!] Operation not permitted. Please run as root.\n";
+        exit(1);
     }
 
     struct timeval timeout = {1, 0};

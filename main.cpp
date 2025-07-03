@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <vector>
 #include <chrono>
+#include <thread>
 
 // Custom libraries
 #include "interfaces/banner.hpp"
@@ -82,7 +83,7 @@ int main(int argc, char* argv[])
             }
             ports = all_tcp_ports;
 
-        } else if (arg == "-sI" || arg == "--scan-icmp"){
+        } else if (arg == "-P" || arg == "--ping"){
             if (!IsHostUpICMP(s_ip))
             {
                 std::cerr << "[!] ICMP shows that host is down or filtered.\n";
