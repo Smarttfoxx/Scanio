@@ -191,8 +191,9 @@ bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     
     if (sockfd < 0) {
-        std::cerr << "[!] Operation not permitted. Please run as root.\n";
-        exit(1);
+        perror("socket");
+        close(sockfd);
+        return 0;
     }
 
     int one = 1;

@@ -16,7 +16,7 @@
 
 int main(int argc, char* argv[])
 {
-    int timeout_sec = 1;
+    int timeout_sec = 0.5;
     int service_timeout_sec = 1;
     int port_amount = 0;
 
@@ -25,18 +25,20 @@ int main(int argc, char* argv[])
     bool bTCP_scan = false;
 
     std::string s_ip;
-    std::string s_service_banner;
     std::string s_port_amount;
 
     std::vector<int> open_ports;
     std::vector<int> ports;
     std::vector<int> all_tcp_ports;
 
+    std::mutex port_mutex;
+    std::vector<std::thread> threads;
+    int thread_amount = 100;
+
     call_banner();
 
     // Check if arguments were passed
-    for (int i = 1; i < argc; ++i)
-    {
+    for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
         // Prepare the argument that handles IPs.
@@ -99,6 +101,10 @@ int main(int argc, char* argv[])
         } else if (arg == "-Ts" || arg == "--tcp-scan") {
             bTCP_scan = true;
 
+        // Set the amount of threads to be used
+        } else if ((arg == "-Tr" || arg == "--threads") && i + 1 < argc) {
+            thread_amount = std::stoi(argv[++i]);
+
         // If no valid argument was passed, break.
         } else {
             std::cerr << "[!] Unknown argument\n";
@@ -110,7 +116,7 @@ int main(int argc, char* argv[])
     // Verifies if the value passed to "s_ip" is a valid IP
     if (!IsValidIP(s_ip))
     {
-        std::cerr << "Invalid address was provided.\n";
+        std::cerr << "Invalid address was provided\n";
         return 1;
     }
 
@@ -118,29 +124,44 @@ int main(int argc, char* argv[])
     if (!IsHostUpICMP(s_ip)) {
         std::cerr << "[!] The host is down or blocking ICMP. Continuing...\n";
     } else {
-        std::cout << "[*] The host " << s_ip << " is up.\n"; 
+        std::cout << "[*] The host " << s_ip << " is up\n"; 
     }
 
     // If the "ports" variable is empty, use common 1000 TCP ports
     if (ports.empty()) ports = common_ports_thousand;
 
     // Start port scanner
-    std::cout << "[*] Scanning for open ports...\n";
     auto scan_start_time = std::chrono::steady_clock::now();
+    ThreadLimiter limiter(thread_amount);
+    std::cout << "[*] Using a total of " << thread_amount << " threads for the scan\n\n";
+    std::cout << "[*] Scanning for open ports...\n";
 
-    for (int port : ports)
-    {
-        if (bTCP_scan) {
-            if (IsPortOpenTcp(s_ip, port, timeout_sec)) {
+    for (int port : ports) {
+        limiter.acquire();
+
+        threads.emplace_back([&, port]() {
+            bool bIs_open = false;
+
+            if (bTCP_scan) {
+                bIs_open = IsPortOpenTcp(s_ip, port, timeout_sec);
+            } else {
+                bIs_open = IsPortOpenSyn(s_ip, port, timeout_sec);
+            }
+
+            if (bIs_open) {
+                std::lock_guard<std::mutex> lock(port_mutex);
                 open_ports.push_back(port);
                 bIs_up = true;
             }
-        } else {
-            if (IsPortOpenSyn(s_ip, port, timeout_sec)) {
-                open_ports.push_back(port);
-                bIs_up = true;
-            }
-        }
+
+            limiter.release();
+
+        });
+    }
+
+    for (auto& t : threads) {
+        if (t.joinable())
+            t.join();
     }
 
     // If no ports were found open
@@ -158,10 +179,38 @@ int main(int argc, char* argv[])
 
         for (int port : open_ports)
         {
-            if (port == 21 || port == 2121) service_timeout_sec = 12; // If the service is FTP, increase wait time to grab header
-            else service_timeout_sec = 1;
-            s_service_banner = ServiceBannerGrabber(s_ip, port, service_timeout_sec);
-            std::cout << std::setw(12) << (std::to_string(port) + "/tcp") << std::setw(8) << "open" << (s_service_banner.empty() ? "No service found" : s_service_banner) << "\n";
+            // If the service is FTP, increase wait time to grab header
+            if (port == 21 || port == 2121)
+                service_timeout_sec = 12;
+            else
+                service_timeout_sec = 1;
+
+            limiter.acquire();
+
+            threads.emplace_back([&, port]() {
+                std::string s_service_banner;
+                bool bIs_open = true;
+
+                s_service_banner = ServiceBannerGrabber(s_ip, port, service_timeout_sec);
+                if (s_service_banner.empty())
+                    bIs_open = false;
+
+                if (bIs_open) {
+                    std::lock_guard<std::mutex> lock(port_mutex);
+                    std::cout << std::setw(12) << (std::to_string(port) + "/tcp") 
+                              << std::setw(8) << "open" 
+                              << (s_service_banner.empty() ? "No service found" : s_service_banner) 
+                              << "\n";
+                }
+
+                limiter.release();
+
+            });
+        }
+
+        for (auto& t : threads) {
+            if (t.joinable())
+                t.join();
         }
     }
 
