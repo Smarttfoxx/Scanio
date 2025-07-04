@@ -95,16 +95,6 @@ int main(int argc, char* argv[])
             }
             ports = all_tcp_ports;
 
-        // Starts the ICMP scan to verify the host status.
-        } else if (arg == "-P" || arg == "--ping"){
-            if (!IsHostUpICMP(s_ip))
-            {
-                std::cerr << "[!] ICMP shows that host is down or filtered.\n";
-                return 1;
-            } else {
-                std::cout << "[*] The host " << s_ip << " is up.\n"; 
-            }
-        
         // Performs SYN scan
         } else if (arg == "-Sy" || arg == "--syn"){
             bSyn_scan = true;
@@ -122,6 +112,16 @@ int main(int argc, char* argv[])
     {
         std::cerr << "Invalid address was provided.\n";
         return 1;
+    }
+
+    // If SYN scan is off (using TCP) check if host is up via ICMP.
+    if (!bSyn_scan) {
+        if (!IsHostUpICMP(s_ip))
+        {
+            std::cerr << "[!] The host is down or blocking ICMP. Continuing...\n";
+        } else {
+            std::cout << "[*] The host " << s_ip << " is up.\n"; 
+        }
     }
 
     // If the "port" variable is empty, use common 1000 TCP ports
