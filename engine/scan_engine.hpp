@@ -17,7 +17,7 @@
 #include <algorithm>
 #include <cctype>
 
-inline std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_sec) {
+std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_sec) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return "";
 
@@ -134,7 +134,7 @@ unsigned short checksum(void* b, int len) {
     return result;
 }
 
-inline bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
+bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
 
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return false;
@@ -186,11 +186,14 @@ std::string GetLocalIP(const std::string& ip_buffer) {
 
 }
 
-inline bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
+bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
 
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     
-    if (sockfd < 0) return false;
+    if (sockfd < 0) {
+        std::cerr << "[!] Operation not permitted. Please run as root.\n";
+        exit(1);
+    }
 
     int one = 1;
     struct timeval timeout;
@@ -255,8 +258,7 @@ inline bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
     dest.sin_port = tcp->dest;
     dest.sin_addr.s_addr = ip->daddr;
 
-    if (sendto(sockfd, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, 
-    (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+    if (sendto(sockfd, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
         perror("sendto function failed");
         close(sockfd);
         return false;
@@ -290,7 +292,6 @@ inline bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
                 close(sockfd);
                 return true;
             } else if (rtcp->rst) {
-                //std::cout << "[-] Port " << port << " is CLOSED\n";
                 close(sockfd);
                 return false;
             }

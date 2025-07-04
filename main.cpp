@@ -22,7 +22,7 @@ int main(int argc, char* argv[])
 
     bool bFind_service = false;
     bool bIs_up = false;
-    bool bSyn_scan = false;
+    bool bTCP_scan = false;
 
     std::string s_ip;
     std::string s_service_banner;
@@ -95,9 +95,9 @@ int main(int argc, char* argv[])
             }
             ports = all_tcp_ports;
 
-        // Performs SYN scan
-        } else if (arg == "-Sy" || arg == "--syn"){
-            bSyn_scan = true;
+        // Performs TCP scan
+        } else if (arg == "-Ts" || arg == "--tcp-scan") {
+            bTCP_scan = true;
 
         // If no valid argument was passed, break.
         } else {
@@ -114,17 +114,14 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // If SYN scan is off (using TCP) check if host is up via ICMP.
-    if (!bSyn_scan) {
-        if (!IsHostUpICMP(s_ip))
-        {
-            std::cerr << "[!] The host is down or blocking ICMP. Continuing...\n";
-        } else {
-            std::cout << "[*] The host " << s_ip << " is up.\n"; 
-        }
+    // Check if host is up via ICMP.
+    if (!IsHostUpICMP(s_ip)) {
+        std::cerr << "[!] The host is down or blocking ICMP. Continuing...\n";
+    } else {
+        std::cout << "[*] The host " << s_ip << " is up.\n"; 
     }
 
-    // If the "port" variable is empty, use common 1000 TCP ports
+    // If the "ports" variable is empty, use common 1000 TCP ports
     if (ports.empty()) ports = common_ports_thousand;
 
     // Start port scanner
@@ -133,7 +130,7 @@ int main(int argc, char* argv[])
 
     for (int port : ports)
     {
-        if (!bSyn_scan) {
+        if (bTCP_scan) {
             if (IsPortOpenTcp(s_ip, port, timeout_sec)) {
                 open_ports.push_back(port);
                 bIs_up = true;
@@ -156,7 +153,7 @@ int main(int argc, char* argv[])
     {
         std::cout << "\n[*] Starting service scanner...\n";
         
-        std::cout << std::left; // Alings text to the left
+        std::cout << std::left;
         std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
 
         for (int port : open_ports)
