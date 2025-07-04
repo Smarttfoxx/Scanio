@@ -22,6 +22,7 @@ int main(int argc, char* argv[])
 
     bool bFind_service = false;
     bool bIs_up = false;
+    bool bSyn_scan = false;
 
     std::string s_ip;
     std::string s_service_banner;
@@ -38,11 +39,12 @@ int main(int argc, char* argv[])
     {
         std::string arg = argv[i];
 
+        // Prepare the argument that handles IPs.
         if ((arg == "-i" || arg == "--ip") && i + 1 < argc)
         {
             s_ip = argv[++i];
 
-            // If the "ip" variable is empty
+            // Check if the "s_ip" variable is empty
             if (s_ip.empty())
             {
                 std::cerr << "[!] No IP provided.\n";
@@ -50,45 +52,64 @@ int main(int argc, char* argv[])
                 return 1;
             }
 
+        // Prepare the argument that handles ports.
         } else if ((arg == "-p" || arg == "--ports") && i + 1 < argc) {
             std::stringstream ss(argv[++i]);
             std::string token;
 
             while (std::getline(ss, token, ','))
             {
-                if (!isStringInteger(token)) // Check if value passed is not an integer
+                // Check if value passed is not an integer.
+                // If no integer, break the application.
+                if (!isStringInteger(token))
                     return 1;
 
                 ports.push_back(std::stoi(token));
             }
-
+        
+        // Prepare the argument that handles timeouts.
+        // All the timeout values are defined in seconds.
         } else if ((arg == "-t" || arg == "--timeout") && i + 1 < argc) {
             timeout_sec = std::stoi(argv[++i]);
 
+        // Prepare the argument that enables service scanning.
         } else if (arg == "-S" || arg == "--service") {
             bFind_service = true;
 
+        // Prepare the argument that handles the top ports.
         } else if ((arg == "-Tp" || arg == "--top-ports") && i + 1 < argc) {
             s_port_amount = argv[++i];
 
-            if (!isStringInteger(s_port_amount)) // Check if value passed is not an integer
+            // Check if value passed is not an integer.
+            // If no integer, break the application.
+            if (!isStringInteger(s_port_amount))
                 return 1;
 
             port_amount = std::stoi(s_port_amount);
             ports.assign(common_ports_thousand.begin(), common_ports_thousand.begin() + std::min(port_amount, (int)common_ports_thousand.size()));
 
+        // Add all known TCP ports to the "ports" variable to scan them.
         } else if (arg == "-Ap" || arg == "--all-ports") {
             for (int i = 1; i <= 65535; ++i) {
                 all_tcp_ports.push_back(i);
             }
             ports = all_tcp_ports;
 
+        // Starts the ICMP scan to verify the host status.
         } else if (arg == "-P" || arg == "--ping"){
             if (!IsHostUpICMP(s_ip))
             {
                 std::cerr << "[!] ICMP shows that host is down or filtered.\n";
                 return 1;
+            } else {
+                std::cout << "[*] The host " << s_ip << " is up.\n"; 
             }
+        
+        // Performs SYN scan
+        } else if (arg == "-Sy" || arg == "--syn"){
+            bSyn_scan = true;
+
+        // If no valid argument was passed, break.
         } else {
             std::cerr << "[!] Unknown argument\n";
             std::cerr << "[*] Default usage: " << argv[0] << " -i <IP> -p <PORT(s)>\n";
@@ -96,6 +117,7 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Verifies if the value passed to "s_ip" is a valid IP
     if (!IsValidIP(s_ip))
     {
         std::cerr << "Invalid address was provided.\n";
@@ -111,15 +133,22 @@ int main(int argc, char* argv[])
 
     for (int port : ports)
     {
-        if (IsPortOpen(s_ip, port, timeout_sec))
-        {
-            std::cout << "[+] Found open port " << port << "/tcp on host " << s_ip << "\n";
-            open_ports.push_back(port);
-            bIs_up = true;
-        } else if (!bIs_up) {
-            std::cerr << "No open ports were found, is the host online?\n";
-            return 1;
+        if (!bSyn_scan) {
+            if (IsPortOpenTcp(s_ip, port, timeout_sec)) {
+                open_ports.push_back(port);
+                bIs_up = true;
+            }
+        } else {
+            if (IsPortOpenSyn(s_ip, port, timeout_sec)) {
+                open_ports.push_back(port);
+                bIs_up = true;
+            }
         }
+    }
+
+    // If no ports were found open
+    if (!bIs_up) {
+        std::cerr << "[!] No open ports were found, is the host online?\n";
     }
 
     // Call the find services function
