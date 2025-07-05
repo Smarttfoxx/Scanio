@@ -17,36 +17,76 @@
 #include <algorithm>
 #include <cctype>
 
-std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_sec) {
+unsigned short checksum(void* b, int len) {
+
+    unsigned short* buf = static_cast<unsigned short*>(b);
+    unsigned int sum = 0;
+    unsigned short result;
+
+    for (sum = 0; len > 1; len -= 2) sum += *buf++;
+
+    if (len == 1) sum += *(unsigned char*)buf;
+
+    sum = (sum >> 16) + (sum & 0xFFFF);
+    sum += (sum >> 16);
+    result = ~sum;
+    return result;
+}
+
+std::string GetLocalIP(const std::string& ip_buffer) {
+
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) return "";
+
+    struct sockaddr_in dest_addr = {};
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(53);
+    inet_pton(AF_INET, ip_buffer.c_str(), &dest_addr.sin_addr);
+
+    connect(sockfd, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+
+    struct sockaddr_in local_addr = {};
+    socklen_t addr_len = sizeof(local_addr);
+    getsockname(sockfd, (struct sockaddr*)&local_addr, &addr_len);
+
+    char local_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &local_addr.sin_addr, local_ip, sizeof(local_ip));
+
+    close(sockfd);
+    return std::string(local_ip);
+
+}
+
+std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_sec) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return "";
 
-    struct timeval timeout{};
+    struct timeval timeout;
     timeout.tv_sec = timeout_sec;
     timeout.tv_usec = 0;
+
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
+    inet_pton(AF_INET, s_ip.c_str(), &addr.sin_addr);
 
-    if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) != 0)
-    {
+    if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) != 0) {
         close(sockfd);
         return "";
     }
 
     // If the port is a known web port, send a HEAD request.
     // The HEAD request will make us receive the server information.
-    if (port == 80 || port == 8080)
-    {
+    if (port == 80 || port == 8080) {
         const char* send_head = "HEAD / HTTP/1.0\r\n\r\n";
         send(sockfd, send_head, strlen(send_head), 0);
     }
 
     std::string banner;
     char buffer[1024];
+
     auto start = std::chrono::steady_clock::now();
 
     while (true)
@@ -61,8 +101,7 @@ std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_se
 
         // If the port is a known web port receives its response
         // Transform the entire response in lowercase to filter it.
-        if (port == 80 || port == 8080) 
-        {
+        if (port == 80 || port == 8080) {
             std::string banner_lower = banner;
             std::transform(banner_lower.begin(), banner_lower.end(), banner_lower.begin(), [](unsigned char c) { return std::tolower(c); });
 
@@ -85,8 +124,7 @@ std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_se
         // If the port is a known FTP port, filter the response.
         // This will give us only the FTP service information.
         // That information is available in the header.
-        if (port == 21 || port == 2121)
-        {
+        if (port == 21 || port == 2121) {
             size_t pos = banner.find("220 ");
 
             if (pos != std::string::npos)
@@ -104,9 +142,11 @@ std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_se
         }
 
         auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed > std::chrono::seconds(timeout_sec)) break;
-
-        if (bytes == 0 || (bytes < 0 && errno != EWOULDBLOCK && errno != EAGAIN)) break;
+        if (elapsed > std::chrono::seconds(timeout_sec))
+            break;
+        
+        if (bytes == 0 || (bytes < 0 && errno != EWOULDBLOCK && errno != EAGAIN))
+            break;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -116,22 +156,6 @@ std::string ServiceBannerGrabber(const std::string& ip, int port, int timeout_se
     while (!banner.empty() && (banner.back() == '\n' || banner.back() == '\r')) banner.pop_back();
 
     return !banner.empty() ? banner : "";
-}
-
-unsigned short checksum(void* b, int len) {
-
-    unsigned short* buf = static_cast<unsigned short*>(b);
-    unsigned int sum = 0;
-    unsigned short result;
-
-    for (sum = 0; len > 1; len -= 2) sum += *buf++;
-
-    if (len == 1) sum += *(unsigned char*)buf;
-
-    sum = (sum >> 16) + (sum & 0xFFFF);
-    sum += (sum >> 16);
-    result = ~sum;
-    return result;
 }
 
 bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
@@ -160,30 +184,6 @@ bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
 
     close(sockfd);
     return false;
-}
-
-std::string GetLocalIP(const std::string& ip_buffer) {
-
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) return "";
-
-    struct sockaddr_in dest_addr = {};
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(53);
-    inet_pton(AF_INET, ip_buffer.c_str(), &dest_addr.sin_addr);
-
-    connect(sockfd, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
-
-    struct sockaddr_in local_addr = {};
-    socklen_t addr_len = sizeof(local_addr);
-    getsockname(sockfd, (struct sockaddr*)&local_addr, &addr_len);
-
-    char local_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &local_addr.sin_addr, local_ip, sizeof(local_ip));
-
-    close(sockfd);
-    return std::string(local_ip);
-
 }
 
 bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {

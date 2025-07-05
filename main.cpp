@@ -56,17 +56,34 @@ int main(int argc, char* argv[])
 
         // Prepare the argument that handles ports.
         } else if ((arg == "-p" || arg == "--ports") && i + 1 < argc) {
-            std::stringstream ss(argv[++i]);
+            std::string buffer = argv[++i];
+            std::stringstream ss(buffer);
             std::string token;
 
-            while (std::getline(ss, token, ','))
-            {
-                // Check if value passed is not an integer.
-                // If no integer, break the application.
-                if (!isStringInteger(token))
-                    return 1;
+            if (buffer.find(',') != std::string::npos) {
+                while (std::getline(ss, token, ',')) {
+                    // Check if value passed is not an integer.
+                    // If no integer, break the application.
+                    if (!isStringInteger(token))
+                        return 1;
 
-                ports.push_back(std::stoi(token));
+                    ports.push_back(std::stoi(token));
+                }
+            } else if (buffer.find('-') != std::string::npos) {
+                while (std::getline(ss, token, '-')) {
+                    int start = std::stoi(token);
+                    
+                    std::getline(ss, token, '-');
+                    int end = std::stoi(token);
+
+                    for (int i = start; i <= end; ++i) {
+                        ports.push_back(i);
+                    }
+
+                }
+            } else {
+                if (!isStringInteger(buffer)) return 1;
+                ports.push_back(std::stoi(buffer));
             }
         
         // Prepare the argument that handles timeouts.
@@ -102,7 +119,7 @@ int main(int argc, char* argv[])
             bTCP_scan = true;
 
         // Set the amount of threads to be used
-        } else if ((arg == "-Tr" || arg == "--threads") && i + 1 < argc) {
+        } else if ((arg == "-Th" || arg == "--threads") && i + 1 < argc) {
             thread_amount = std::stoi(argv[++i]);
 
         // If no valid argument was passed, break.
@@ -170,8 +187,7 @@ int main(int argc, char* argv[])
     }
 
     // Call the find services function
-    if (bFind_service && !(open_ports.empty()))
-    {
+    if (bFind_service && !(open_ports.empty())) {
         std::cout << "\n[*] Starting service scanner...\n";
         
         std::cout << std::left;
@@ -182,8 +198,6 @@ int main(int argc, char* argv[])
             // If the service is FTP, increase wait time to grab header
             if (port == 21 || port == 2121)
                 service_timeout_sec = 12;
-            else
-                service_timeout_sec = 1;
 
             limiter.acquire();
 
@@ -192,6 +206,7 @@ int main(int argc, char* argv[])
                 bool bIs_open = true;
 
                 s_service_banner = ServiceBannerGrabber(s_ip, port, service_timeout_sec);
+
                 if (s_service_banner.empty())
                     bIs_open = false;
 
