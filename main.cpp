@@ -1,12 +1,6 @@
 // C++ libraries
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <sstream>
-#include <unistd.h>
 #include <vector>
-#include <chrono>
-#include <thread>
+#include <atomic>
 
 // Custom libraries
 #include "interfaces/banner.hpp"
@@ -34,6 +28,9 @@ int main(int argc, char* argv[])
     std::mutex port_mutex;
     std::vector<std::thread> threads;
     int thread_amount = 100;
+
+    std::atomic<int> ports_scanned{0};
+    int total_ports;
 
     call_banner();
 
@@ -146,18 +143,50 @@ int main(int argc, char* argv[])
 
     // If the "ports" variable is empty, use common 1000 TCP ports
     if (ports.empty()) ports = common_ports_thousand;
+    total_ports = ports.size();
+
+    ThreadLimiter limiter(thread_amount);
+    std::atomic<bool> done{false};
+
+    auto scan_start_time = std::chrono::steady_clock::now();
+
+    std::thread progress_thread([&]() {
+        using namespace std::chrono_literals;
+
+        while (!done) {
+            int done_count = ports_scanned.load();
+            float progress = (done_count * 100.0f) / total_ports;
+            int sleep_time = 0.5;
+
+            // Estimate based on elapsed time and remaining ports
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - scan_start_time).count();
+            float eta = (done_count > 0) ? (elapsed * total_ports / done_count - elapsed) : 0;
+
+            if (progress >= 100)
+                return;
+
+            if (progress > 0 && !(eta <= 5)) {
+                std::cout << "\r[!] Progress: " << std::fixed << std::setprecision(1) << progress << "%  |  ETA: " << (int)eta << "s" << std::flush << "\n";
+                sleep_time = 5;
+            }
+
+            std::this_thread::sleep_for(std::chrono::seconds(sleep_time));
+        }
+
+        std::cout << "\r[!] Progress: 100.0%  |  ETA: 0s" << std::flush << "\n";
+    });
 
     // Start port scanner
-    auto scan_start_time = std::chrono::steady_clock::now();
-    ThreadLimiter limiter(thread_amount);
     std::cout << "[*] Using a total of " << thread_amount << " threads for the scan\n\n";
     std::cout << "[*] Scanning for open ports...\n";
 
     for (int port : ports) {
         limiter.acquire();
-
         threads.emplace_back([&, port]() {
             bool bIs_open = false;
+
+            ports_scanned++;
 
             if (bTCP_scan) {
                 bIs_open = IsPortOpenTcp(s_ip, port, timeout_sec);
@@ -176,9 +205,13 @@ int main(int argc, char* argv[])
         });
     }
 
+    done = true;
+    progress_thread.join();
+
     for (auto& t : threads) {
-        if (t.joinable())
+        if (t.joinable()) {
             t.join();
+        }
     }
 
     // If no ports were found open
@@ -234,7 +267,7 @@ int main(int argc, char* argv[])
     int minutes = total_seconds / 60;
     int seconds = total_seconds % 60;
     
-    std::cout << "\nA total of " << ports.size() << " ports were scanned in " << minutes << "m:" << seconds << "s\n";
+    std::cout << "\nA total of " << total_ports << " ports were scanned in " << minutes << "m:" << seconds << "s\n";
 
     return 0;
 }

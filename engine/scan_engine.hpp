@@ -5,7 +5,7 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
-
+#include <unistd.h>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <cctype>
+#include <atomic>
 
 unsigned short checksum(void* b, int len) {
 
