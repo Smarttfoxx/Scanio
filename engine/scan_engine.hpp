@@ -348,3 +348,4 @@ bool IsValidIP(const std::string& ip) {
     sockaddr_in addr;
     return inet_pton(AF_INET, ip.c_str(), &(addr.sin_addr)) == 1;
 }
+
