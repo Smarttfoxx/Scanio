@@ -64,7 +64,7 @@ unsigned short checksum(void* b, int len) {
     return result;
 }
 
-std::string GetLocalIP(const std::string& ip_buffer) {
+std::string GetLocalIP(const std::string& s_ip) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
         return "";
@@ -72,8 +72,8 @@ std::string GetLocalIP(const std::string& ip_buffer) {
     struct sockaddr_in dest_addr = {};
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(53);
-    inet_pton(AF_INET, ip_buffer.c_str(), &dest_addr.sin_addr);
 
+    inet_pton(AF_INET, s_ip.c_str(), &dest_addr.sin_addr);
     connect(sockfd, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
     struct sockaddr_in local_addr = {};
@@ -330,7 +330,7 @@ bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
     }
 }
 
-bool IsHostUpICMP(const std::string& ip) {
+bool IsHostUpICMP(const std::string& s_ip) {
 
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
 
@@ -344,7 +344,7 @@ bool IsHostUpICMP(const std::string& ip) {
 
     sockaddr_in addr {};
     addr.sin_family = AF_INET;
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
+    inet_pton(AF_INET, s_ip.c_str(), &addr.sin_addr);
 
     char packet[64];
     memset(packet, 0, sizeof(packet));
@@ -373,8 +373,8 @@ bool IsHostUpICMP(const std::string& ip) {
     return received > 0;
 }
 
-bool IsValidIP(const std::string& ip) {
+bool IsValidIP(const std::string& s_ip) {
     sockaddr_in addr;
 
-    return inet_pton(AF_INET, ip.c_str(), &(addr.sin_addr)) == 1;
+    return inet_pton(AF_INET, s_ip.c_str(), &(addr.sin_addr)) == 1;
 }

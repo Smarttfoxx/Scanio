@@ -26,5 +26,5 @@
 #include <iostream>
 
 inline void render_banner() {
-    std::cout << "#### Port Scanner v1.0 ####\n";
+    std::cout << "[*] Initializing Scanio - Network Scanner 1.0\n";
 }
