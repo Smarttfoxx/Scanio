@@ -13,8 +13,8 @@
 
 int main(int argc, char* argv[])
 {
-    int timeout_sec = 0.5;
-    int service_timeout_sec = 1;
+    int timeout_sec = 3;
+    int service_timeout_sec = 3;
     int port_amount = 0;
 
     bool bFind_service = false;
@@ -90,7 +90,7 @@ int main(int argc, char* argv[])
         
         // Prepare the argument that handles timeouts.
         // All the timeout values are defined in seconds.
-        } else if ((arg == "-t" || arg == "--timeout") && i + 1 < argc) {
+        } else if ((arg == "-d" || arg == "--delay") && i + 1 < argc) {
             timeout_sec = std::stoi(argv[++i]);
 
         // Prepare the argument that enables service scanning.
@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
         auto last_time = std::chrono::steady_clock::now();
 
         while (!bProgress_status) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(2));
             int current = ports_scanned_count.load();
             int delta = current - last_count;
             auto now = std::chrono::steady_clock::now();
