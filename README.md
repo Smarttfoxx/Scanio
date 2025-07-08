@@ -33,14 +33,29 @@ g++ -std=c++17 main.cpp -o scanio -lpthread
 ### Options
 
 ```
--i, --ip	        Target IP address (required)
--p, --ports       Ports to scan (e.g., 80, 20-25, 21,22,23)
--Tp, --top-ports	Scan top N common ports (e.g., -Tp 100)
--Ap, --all-ports	Scan all 65535 TCP ports
--Ts, --tcp-scan	  Use TCP Connect scan (default is SYN scan)
--S, --service	    Enable banner grabbing for service detection
--d, --delay	      Timeout for port probes in seconds (default: 3)
--Th, --threads	  Number of threads to use for scanning (default: 100)
+# Target IP address (required)
+-i, --ip
+
+# Ports to scan (e.g., 80, 20-25, 21,22,23)
+-p, --ports
+
+#Scan top N common ports (e.g., -Tp 100)
+-Tp, --top-ports
+
+# Scan all 65535 TCP ports
+-Ap, --all-ports
+
+# Use TCP Connect scan (default is SYN scan)
+-Ts, --tcp-scan
+
+# Enable banner grabbing for service detection
+-S, --service
+
+# Timeout for port probes in seconds (default: 3)
+-d, --delay
+
+# Number of threads to use for scanning (default: 100)
+-Th, --threads
 ```
 
 ---
