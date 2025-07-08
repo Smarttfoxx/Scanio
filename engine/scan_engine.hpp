@@ -21,28 +21,30 @@
 #include <atomic>
 
 // Custom libraries
-#include "../engine/default_ports.h"
+#include "default_ports.h"
 
 unsigned short checksum(void* b, int len) {
-
     unsigned short* buf = static_cast<unsigned short*>(b);
     unsigned int sum = 0;
     unsigned short result;
 
-    for (sum = 0; len > 1; len -= 2) sum += *buf++;
+    for (sum = 0; len > 1; len -= 2)
+        sum += *buf++;
 
-    if (len == 1) sum += *(unsigned char*)buf;
+    if (len == 1)
+        sum += *(unsigned char*)buf;
 
     sum = (sum >> 16) + (sum & 0xFFFF);
     sum += (sum >> 16);
     result = ~sum;
+
     return result;
 }
 
 std::string GetLocalIP(const std::string& ip_buffer) {
-
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) return "";
+    if (sockfd < 0)
+        return "";
 
     struct sockaddr_in dest_addr = {};
     dest_addr.sin_family = AF_INET;
@@ -59,13 +61,15 @@ std::string GetLocalIP(const std::string& ip_buffer) {
     inet_ntop(AF_INET, &local_addr.sin_addr, local_ip, sizeof(local_ip));
 
     close(sockfd);
+
     return std::string(local_ip);
 
 }
 
 std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_sec) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) return "";
+    if (sockfd < 0)
+        return "";
 
     struct timeval timeout;
     timeout.tv_sec = timeout_sec;
@@ -113,24 +117,21 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
 
             size_t pos = banner_lower.find("server: ");
 
-            if (pos != std::string::npos) 
-            {
+            if (pos != std::string::npos)  {
                 size_t start = pos + 8;
                 size_t end = banner.find("\r\n", start);
                 
                 if (end != std::string::npos) 
-                {
                     banner = banner.substr(start, end - start);
-                } else {
+                else
                     banner = banner.substr(start);
-                }
             }
         }
 
         // If the port is a known FTP port, filter the response.
         // This will give us only the FTP service information.
         // That information is available in the header.
-        if (std::find(common_ftp.begin(), common_ftp.end(), port) != common_ftp.end()) {
+        if (std::find(common_ftp_ports.begin(), common_ftp_ports.end(), port) != common_ftp_ports.end()) {
             size_t pos = banner.find("220 ");
 
             if (pos != std::string::npos)
@@ -139,11 +140,9 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
                 size_t end = banner.find("[", start);
 
                 if (end != std::string::npos)
-                {
                     banner = banner.substr(start, end - start);
-                } else {
+                else
                     banner = banner.substr(start);
-                }
             }
         }
 
@@ -159,15 +158,17 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
     
     close(sockfd);
 
-    while (!banner.empty() && (banner.back() == '\n' || banner.back() == '\r')) banner.pop_back();
+    while (!banner.empty() && (banner.back() == '\n' || banner.back() == '\r'))
+        banner.pop_back();
 
     return !banner.empty() ? banner : "";
 }
 
 bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
-
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) return false;
+
+    if (sockfd < 0)
+        return false;
 
     // Set socket timeout
     struct timeval timeout;
@@ -189,11 +190,11 @@ bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
     }
 
     close(sockfd);
+
     return false;
 }
 
 bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
-
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
     
     if (sockfd < 0) {
@@ -351,6 +352,6 @@ bool IsHostUpICMP(const std::string& ip) {
 
 bool IsValidIP(const std::string& ip) {
     sockaddr_in addr;
+
     return inet_pton(AF_INET, ip.c_str(), &(addr.sin_addr)) == 1;
 }
-

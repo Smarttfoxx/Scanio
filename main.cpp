@@ -10,11 +10,13 @@
 #include "engine/scan_engine.hpp"
 #include "dependencies/helper_functions.hpp"
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
+
     int timeout_sec = 3;
     int service_timeout_sec = 3;
     int port_amount = 0;
+    int thread_amount = 100;
+    int total_ports;
 
     bool bFind_service = false;
     bool bIs_up = false;
@@ -29,27 +31,22 @@ int main(int argc, char* argv[])
 
     std::mutex result_mutex;
 
-    int thread_amount = 100;
-
     std::atomic<int> services_scanned{0};
     std::atomic<int> ports_scanned_count{0};
-
-    int total_ports;
 
     call_banner();
 
     // Check if arguments were passed
     for (int i = 1; i < argc; ++i) {
+
         std::string arg = argv[i];
 
         // Prepare the argument that handles IPs.
-        if ((arg == "-i" || arg == "--ip") && i + 1 < argc)
-        {
+        if ((arg == "-i" || arg == "--ip") && i + 1 < argc) {
             s_ip = argv[++i];
 
             // Check if the "s_ip" variable is empty
-            if (s_ip.empty())
-            {
+            if (s_ip.empty()) {
                 std::cerr << "[!] No IP provided.\n";
                 std::cerr << "[*] Default usage: " << argv[0] << " -i <IP> -p <PORT(s)>\n";
                 return 1;
@@ -77,13 +74,14 @@ int main(int argc, char* argv[])
                     std::getline(ss, token, '-');
                     int end = std::stoi(token);
 
-                    for (int i = start; i <= end; ++i) {
+                    for (int i = start; i <= end; ++i)
                         ports.push_back(i);
-                    }
 
                 }
             } else {
-                if (!isStringInteger(buffer)) return 1;
+                if (!isStringInteger(buffer))
+                    return 1;
+
                 ports.push_back(std::stoi(buffer));
             }
         
@@ -110,9 +108,9 @@ int main(int argc, char* argv[])
 
         // Add all known TCP ports to the "ports" variable to scan them.
         } else if (arg == "-Ap" || arg == "--all-ports") {
-            for (int i = 1; i <= 65535; ++i) {
+            for (int i = 1; i <= 65535; ++i)
                 all_tcp_ports.push_back(i);
-            }
+
             ports = all_tcp_ports;
 
         // Performs TCP scan
@@ -132,34 +130,36 @@ int main(int argc, char* argv[])
     }
 
     // Verifies if the value passed to "s_ip" is a valid IP
-    if (!IsValidIP(s_ip))
-    {
+    if (!IsValidIP(s_ip)) {
         std::cerr << "Invalid address was provided.\n";
         return 1;
     }
 
     // Check if host is up via ICMP.
-    if (!IsHostUpICMP(s_ip)) {
+    if (!IsHostUpICMP(s_ip))
         std::cerr << "[!] The host is down or blocking ICMP. Continuing...\n";
-    } else {
+    else
         std::cout << "[*] The host " << s_ip << " is up.\n"; 
-    }
 
     // If the "ports" variable is empty, use common 1000 TCP ports
-    if (ports.empty()) ports = common_ports_thousand;
+    if (ports.empty())
+        ports = common_ports_thousand;
+
     total_ports = ports.size();
 
+    // Prepare the thread pool system
     ThreadPool pool(thread_amount);
     auto start_time = std::chrono::steady_clock::now();
     std::atomic<bool> bProgress_status{false};
 
+    // We now call the thread to verify the scan status
     std::thread port_progress_thread([&]() {
         std::vector<float> durations;
         int last_count = 0;
         auto last_time = std::chrono::steady_clock::now();
 
         while (!bProgress_status) {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            std::this_thread::sleep_for(std::chrono::seconds(3));
             int current = ports_scanned_count.load();
             int delta = current - last_count;
             auto now = std::chrono::steady_clock::now();
@@ -209,9 +209,8 @@ int main(int argc, char* argv[])
     port_progress_thread.join();
 
     // If no ports were found open
-    if (!bIs_up) {
+    if (!bIs_up)
         std::cerr << "[!] No open ports were found, is the host online?\n";
-    }
 
     // Call the find services function
     if (bFind_service && !(open_ports.empty())) {
@@ -221,10 +220,9 @@ int main(int argc, char* argv[])
         std::cout << std::left;
         std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
 
-        for (int port : open_ports)
-        {
+        for (int port : open_ports) {
             // If the service is FTP, increase wait time to grab header
-            if (std::find(common_ftp.begin(), common_ftp.end(), port) != common_ftp.end())
+            if (std::find(common_ftp_ports.begin(), common_ftp_ports.end(), port) != common_ftp_ports.end())
                 service_timeout_sec = 12;
  
             pool.enqueue([&, port]() {

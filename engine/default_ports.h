@@ -1,4 +1,5 @@
 #pragma once
+
 #include <vector>
 
 std::vector<int> common_ports_thousand = {
@@ -79,6 +80,6 @@ std::vector<int> common_web_ports = {
     9996,9997,9998,9999
 };
 
-std::vector<int> common_ftp = {
+std::vector<int> common_ftp_ports = {
     20,21,69,115,2121,8021,990,989,2221,2300,9021,21212
-}
+};
