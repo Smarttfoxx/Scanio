@@ -1,4 +1,6 @@
 #pragma once
+
+// C++ libraries
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 #include <arpa/inet.h>
@@ -17,6 +19,9 @@
 #include <algorithm>
 #include <cctype>
 #include <atomic>
+
+// Custom libraries
+#include "../engine/default_ports.h"
 
 unsigned short checksum(void* b, int len) {
 
@@ -80,7 +85,7 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
 
     // If the port is a known web port, send a HEAD request.
     // The HEAD request will make us receive the server information.
-    if (port == 80 || port == 8080) {
+    if (std::find(common_web_ports.begin(), common_web_ports.end(), port) != common_web_ports.end()) {
         const char* send_head = "HEAD / HTTP/1.0\r\n\r\n";
         send(sockfd, send_head, strlen(send_head), 0);
     }
@@ -102,7 +107,7 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
 
         // If the port is a known web port receives its response
         // Transform the entire response in lowercase to filter it.
-        if (port == 80 || port == 8080) {
+        if (std::find(common_web_ports.begin(), common_web_ports.end(), port) != common_web_ports.end()) {
             std::string banner_lower = banner;
             std::transform(banner_lower.begin(), banner_lower.end(), banner_lower.begin(), [](unsigned char c) { return std::tolower(c); });
 
@@ -125,7 +130,7 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
         // If the port is a known FTP port, filter the response.
         // This will give us only the FTP service information.
         // That information is available in the header.
-        if (port == 21 || port == 2121) {
+        if (std::find(common_ftp.begin(), common_ftp.end(), port) != common_ftp.end()) {
             size_t pos = banner.find("220 ");
 
             if (pos != std::string::npos)

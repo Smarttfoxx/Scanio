@@ -8,7 +8,6 @@
 // Custom libraries
 #include "interfaces/banner.hpp"
 #include "engine/scan_engine.hpp"
-#include "engine/default_ports.h"
 #include "dependencies/helper_functions.hpp"
 
 int main(int argc, char* argv[])
@@ -225,7 +224,7 @@ int main(int argc, char* argv[])
         for (int port : open_ports)
         {
             // If the service is FTP, increase wait time to grab header
-            if (port == 21 || port == 2121)
+            if (std::find(common_ftp.begin(), common_ftp.end(), port) != common_ftp.end())
                 service_timeout_sec = 12;
  
             pool.enqueue([&, port]() {
