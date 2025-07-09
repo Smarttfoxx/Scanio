@@ -26,6 +26,7 @@
 #include <sstream>
 #include <mutex>
 #include <condition_variable>
+#include <string>
 
 class ThreadPool {
 public:
@@ -89,5 +90,13 @@ bool isStringInteger(const std::string& str) {
         return false;
     }
 
+    return true;
+}
+
+bool FindIn(std::vector<int>& list, int buf) {
+
+    if (std::find(list.begin(), list.end(), buf) == list.end())
+        return false;
+    
     return true;
 }

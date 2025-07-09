@@ -42,13 +42,14 @@ int main(int argc, char* argv[]) {
     int total_ports;
 
     bool bFind_service = false;
-    bool bIs_up = false;
     bool bTCP_scan = false;
+    bool bIs_up = false;
 
-    std::vector<std::string> s_ip;
     std::string s_port_amount;
 
-    std::vector<int> open_ports;
+    std::vector<std::string> s_ip;
+    //thread_local std::vector<int> open_ports;
+    std::vector<IP_Instance> ip_instances;
     std::vector<int> ports;
     std::vector<int> all_tcp_ports;
 
@@ -59,7 +60,7 @@ int main(int argc, char* argv[]) {
 
     render_banner();
 
-    // Check if arguments were passed
+    // Check and process program arguments
     for (int i = 1; i < argc; ++i) {
 
         std::string arg = argv[i];
@@ -73,13 +74,13 @@ int main(int argc, char* argv[]) {
 
             if (buffer.find(',') != std::string::npos) {
                 while (std::getline(ss, token, ',')) {
-                    s_ip.push_back(token);
+                    ip_instances.emplace_back(IP_Instance{token});
                 }
             } else
-                s_ip.push_back(buffer);
+                ip_instances.emplace_back(IP_Instance{buffer});
 
             // Check if the "s_ip" variable is empty
-            if (s_ip.empty()) {
+            if (buffer.empty()) {
                 std::cerr << "[!] No IP provided.\n";
                 std::cerr << "[*] Default usage: " << argv[0] << " -i <IP> -p <PORT(s)>\n";
                 return 1;
@@ -156,33 +157,29 @@ int main(int argc, char* argv[]) {
 
         // If no valid argument was passed, break.
         } else {
-            std::cerr << "[!] Unknown argument\n";
+            std::cerr << "[!] Unknown argument was passed.\n";
             std::cerr << "[*] Default usage: " << argv[0] << " -i <IP> -p <PORT(s)>\n";
             return 1;
         }
     }
 
-    // Verifies if the value passed to "s_ip" is a valid IP
-    for (const std::string& ip_buf : s_ip) {
-        if (!IsValidIP(ip_buf)) {
+    for (const IP_Instance& ip_obj : ip_instances) {
+        // Verifies if the value passed to "s_ip" is a valid IP
+        if (!IsValidIP(ip_obj.ip_value)) {
             std::cerr << "Invalid address was provided.\n";
             return 1;
         }
-    }
 
-    // Check if host is up via ICMP.
-    for (const std::string& ip_buf : s_ip) {
-        if (!IsHostUpICMP(ip_buf))
-            std::cerr << "[!] The host is down or blocking ICMP. Continuing...\n";
+        // Check if host is up via ICMP.
+        if (IsHostUpICMP(ip_obj.ip_value))
+            std::cout << "[*] The host " << ip_obj.ip_value << " is up.\n"; 
         else
-            std::cout << "[*] The host " << ip_buf << " is up.\n"; 
+            std::cerr << "[!] The host is down or blocking ICMP. Continuing anyways...\n";
     }
 
     // If the "ports" variable is empty, use common 1000 TCP ports
     if (ports.empty())
         ports = common_ports_thousand;
-
-    total_ports = ports.size();
 
     // Prepare the thread pool system
     ThreadPool pool(thread_amount);
@@ -190,7 +187,7 @@ int main(int argc, char* argv[]) {
     std::atomic<bool> bProgress_status{false};
 
     // We now call the thread to verify the scan status
-    std::thread port_progress_thread([&]() {
+    /*std::thread port_progress_thread([&]() {
         std::vector<float> durations;
         int last_count = 0;
         auto last_time = std::chrono::steady_clock::now();
@@ -213,28 +210,29 @@ int main(int argc, char* argv[]) {
             last_time = now;
             last_count = current;
         }
-
-        std::cout << "\r[!] Port scan progress: 100.0%  |  ETA: 0s" << std::endl;
-    });
+    });*/
 
     // Start port scanner
-    std::cout << "[*] Using a total of " << thread_amount << " threads for the scan.\n\n";
+    std::cout << "[*] Using a total of " << thread_amount << " threads for the scan.\n";
 
-    for (const std::string& ip_buf : s_ip) {
-        std::cout << "[*] Scanning for open ports on host " << ip_buf << "\n";
+    for (IP_Instance& ip_obj : ip_instances) {
+        std::string ip = ip_obj.ip_value;
+        auto open_ports_ptr = &ip_obj.open_ports;
+
+        std::cout << "\n[*] Scanning for open ports on host " << ip_obj.ip_value << "\n";
 
         for (int port : ports) {
-            pool.enqueue([&, port]() {
+            pool.enqueue([=, &result_mutex, &ports_scanned_count, &bIs_up]() {
                 bool bIs_open = false;
 
                 if (bTCP_scan)
-                    bIs_open = IsPortOpenTcp(ip_buf, port, timeout_sec);
+                    bIs_open = IsPortOpenTcp(ip_obj.ip_value, port, timeout_sec);
                 else
-                    bIs_open = IsPortOpenSyn(ip_buf, port, timeout_sec);
+                    bIs_open = IsPortOpenSyn(ip_obj.ip_value, port, timeout_sec);
 
                 if (bIs_open) {
                     std::lock_guard<std::mutex> lock(result_mutex);
-                    open_ports.push_back(port);
+                    open_ports_ptr->push_back(port);
                     bIs_up = true;
                 }
                 ++ports_scanned_count;
@@ -242,37 +240,33 @@ int main(int argc, char* argv[]) {
         }
 
         while (ports_scanned_count.load() < ports.size())
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-        if (ports_scanned_count.load() >= ports.size())
+        if (ports_scanned_count.load() >= ports.size()) {
             ports_scanned_count = 0;
-    }
+        }
 
-    bProgress_status = true;
-    port_progress_thread.join();
+        // If no ports were found open
+        if (!bIs_up)
+            std::cerr << "[!] No open ports were found, is the host online?\n";
 
-    // If no ports were found open
-    if (!bIs_up)
-        std::cerr << "[!] No open ports were found, is the host online?\n";
-
-    // Call the find services function
-    for (const std::string& ip_buf : s_ip) {
-        if (bFind_service && !(open_ports.empty())) {
-            std::cout << "\n[*] Starting service scanner...\n";
+        // Verify if we should call the find services function
+        if (bFind_service && !(ip_obj.open_ports.empty())) {
+            std::cout << "\n[*] Starting service scanner on host " << ip_obj.ip_value << "\n\n";
             
             std::cout << std::left;
             std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
 
-            for (int port : open_ports) {
+            for (int port : ip_obj.open_ports) {
                 // If the service is FTP, increase wait time to grab header
-                if (std::find(common_ftp_ports.begin(), common_ftp_ports.end(), port) != common_ftp_ports.end())
+                if (FindIn(common_ftp_ports, port))
                     service_timeout_sec = 12;
     
                 pool.enqueue([&, port]() {
                     std::string s_service_banner;
                     bool bIs_open = true;
                     
-                    s_service_banner = ServiceBannerGrabber(ip_buf, port, service_timeout_sec);
+                    s_service_banner = ServiceBannerGrabber(ip_obj.ip_value, port, service_timeout_sec);
 
                     if (s_service_banner.empty())
                         bIs_open = false;
@@ -288,17 +282,22 @@ int main(int argc, char* argv[]) {
                 });
             }
 
-            while (services_scanned.load() < open_ports.size())
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            while (services_scanned.load() < ip_obj.open_ports.size())
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-            if (services_scanned.load() >= open_ports.size())
+            if (services_scanned.load() >= ip_obj.open_ports.size())
                 services_scanned = 0;
         }
     }
 
+    bProgress_status = true;
+    //port_progress_thread.join();
+
     auto end_time = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
-    std::cout << "[*] Scan completed in " << elapsed << " seconds.\n";
+    total_ports = ports.size();
+
+    std::cout << "\n[*] Scan completed in " << elapsed << " seconds.\n";
     std::cout << "[*] A total of " << total_ports << " ports were scanned.\n";
 
     return 0;

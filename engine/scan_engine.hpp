@@ -46,6 +46,14 @@
 // Custom libraries
 #include "default_ports.h"
 
+class IP_Instance {
+public:
+    const std::string ip_value;
+    std::vector<int> open_ports;
+
+    IP_Instance(const std::string& ip) : ip_value(ip){};
+};
+
 unsigned short checksum(void* b, int len) {
     unsigned short* buf = static_cast<unsigned short*>(b);
     unsigned int sum = 0;
