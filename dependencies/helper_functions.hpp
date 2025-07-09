@@ -75,7 +75,7 @@ private:
     bool stop;
 };
 
-bool isStringInteger(const std::string& str) {
+bool isInteger(const std::string& str) {
     std::istringstream iss(str);
     int num;
     char c;

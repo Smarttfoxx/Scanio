@@ -24,21 +24,28 @@
 #pragma once
 
 // C++ libraries
-#include <netinet/in.h>
-#include <netinet/ip_icmp.h>
-#include <arpa/inet.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <sstream>
+#include <vector>
+#include <unordered_set>
+#include <unordered_map>
 #include <chrono>
 #include <thread>
-#include <iomanip>
+#include <cstring>
+#include <string>
 #include <fcntl.h>
+#include <unistd.h>
+#include <iostream>
+#include <arpa/inet.h>
+#include <netinet/ip.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <sys/time.h>
+#include <netdb.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
+#include <sstream>
+#include <iomanip>
 #include <algorithm>
 #include <cctype>
 #include <atomic>
@@ -46,13 +53,41 @@
 // Custom libraries
 #include "default_ports.h"
 
-class IP_Instance {
-public:
-    const std::string ip_value;
-    std::vector<int> open_ports;
+struct HostInstance {
+    const std::string ipValue;
+    std::vector<int> openPorts;
 
-    IP_Instance(const std::string& ip) : ip_value(ip){};
+    HostInstance(const std::string& ip) : ipValue(ip){};
 };
+
+struct pseudo_header {
+    uint32_t src_addr;
+    uint32_t dst_addr;
+    uint8_t placeholder;
+    uint8_t protocol;
+    uint16_t tcp_length;
+};
+
+unsigned short checksum(unsigned short *ptr, int nbytes) {
+    long sum = 0;
+    unsigned short oddbyte;
+
+    while (nbytes > 1) {
+        sum += *ptr++;
+        nbytes -= 2;
+    }
+
+    if (nbytes == 1) {
+        oddbyte = 0;
+        *((unsigned char *)&oddbyte) = *(unsigned char *)ptr;
+        sum += oddbyte;
+    }
+
+    sum = (sum >> 16) + (sum & 0xffff);
+    sum += (sum >> 16);
+    
+    return (unsigned short)(~sum);
+}
 
 unsigned short checksum(void* b, int len) {
     unsigned short* buf = static_cast<unsigned short*>(b);
@@ -225,117 +260,174 @@ bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
     return false;
 }
 
-bool IsPortOpenSyn(const std::string& s_ip, int port, int timeout_sec) {
-    int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-    
-    if (sockfd < 0) {
+std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int>& ports, float timeout_sec) {
+    std::vector<int> open_ports;
+    std::unordered_set<int> scanned_ports;
+    std::unordered_map<int, int> port_map;
+
+    int raw_sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+
+    if (raw_sock < 0) {
         perror("socket");
-        close(sockfd);
-        return 0;
+        return open_ports;
     }
+
+    // Set non-blocking
+    int flags = fcntl(raw_sock, F_GETFL, 0);
+    fcntl(raw_sock, F_SETFL, flags | O_NONBLOCK);
 
     int one = 1;
-    struct timeval timeout;
-    timeout.tv_sec = timeout_sec;
-    timeout.tv_usec = 0;
+    setsockopt(raw_sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
 
-    setsockopt(sockfd, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-    char packet[4096];
-    memset(packet, 0, sizeof(packet));
-
-    struct iphdr *ip = (struct iphdr *)packet;
-    struct tcphdr *tcp = (struct tcphdr*)(packet + sizeof(struct iphdr));
-
-    ip->ihl = 5;
-    ip->version = 4;
-    ip->tos = 0;
-    ip->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
-    ip->id = htons(54321);
-    ip->frag_off = 0;
-    ip->ttl = 64;
-    ip->protocol = IPPROTO_TCP;
-    ip->check = 0;
-    std::string local_ip = GetLocalIP(s_ip);
-    if (local_ip.empty()) return false;
-    ip->saddr = inet_addr(local_ip.c_str());
-    ip->daddr = inet_addr(s_ip.c_str());
-    ip->check = checksum((unsigned short*)ip, sizeof(struct iphdr));
-
-    uint16_t source_port = 33217;
-    tcp->source = htons(source_port);
-    tcp->dest = htons(port);
-    tcp->seq = htonl(0);
-    tcp->ack_seq = 0;
-    tcp->doff = 5;
-    tcp->syn = 1;
-    tcp->window = htons(5840);
-    tcp->check = 0;
-    tcp->urg_ptr = 0;
-
-    struct pseudo_header {
-        uint32_t src, dst;
-        uint8_t zero, protocol;
-        uint16_t tcp_len;
-    } psh;
-
-    psh.src = ip->saddr;
-    psh.dst = ip->daddr;
-    psh.zero = 0;
-    psh.protocol = IPPROTO_TCP;
-    psh.tcp_len = htons(sizeof(struct tcphdr));
-
-    char pseudo[sizeof(psh) + sizeof(struct tcphdr)];
-    memcpy(pseudo, &psh, sizeof(psh));
-    memcpy(pseudo + sizeof(psh), tcp, sizeof(struct tcphdr));
-
-    tcp->check = checksum((unsigned short *)pseudo, sizeof(pseudo));
-
-    struct sockaddr_in dest = {};
-    dest.sin_family = AF_INET;
-    dest.sin_port = tcp->dest;
-    dest.sin_addr.s_addr = ip->daddr;
-
-    if (sendto(sockfd, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-        perror("sendto function failed");
-        close(sockfd);
-        return false;
+    // epoll setup
+    int epfd = epoll_create1(0);
+    if (epfd == -1) {
+        perror("epoll_create1");
+        close(raw_sock);
+        return open_ports;
     }
 
-    char buffer[4096];
-    struct sockaddr_in sender;
-    socklen_t sender_len = sizeof(sender);
+    epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = raw_sock;
 
-    while (true) {
-        ssize_t bytes = recvfrom(sockfd, buffer, sizeof(buffer), 0,
-                                 (struct sockaddr *)&sender, &sender_len);
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, raw_sock, &ev) == -1) {
+        perror("epoll_ctl");
+        close(raw_sock);
+        close(epfd);
+        return open_ports;
+    }
 
-        if (bytes < 0) {
-            close(sockfd);
-            return false;
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    inet_pton(AF_INET, target_ip.c_str(), &dst.sin_addr);
+
+    char packet[4096];
+
+    std::string local_ip;
+    {
+        int tmp_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        sockaddr_in tmp_dst{};
+        tmp_dst.sin_family = AF_INET;
+        tmp_dst.sin_port = htons(53);
+        inet_pton(AF_INET, target_ip.c_str(), &tmp_dst.sin_addr);
+        connect(tmp_sock, (sockaddr*)&tmp_dst, sizeof(tmp_dst));
+        sockaddr_in local_addr{};
+        socklen_t len = sizeof(local_addr);
+        getsockname(tmp_sock, (sockaddr*)&local_addr, &len);
+        char buf[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &local_addr.sin_addr, buf, sizeof(buf));
+        local_ip = buf;
+        close(tmp_sock);
+    }
+
+    uint32_t src_addr = inet_addr(local_ip.c_str());
+    uint32_t dst_addr = inet_addr(target_ip.c_str());
+
+    // Send SYN packets
+    for (int port : ports) {
+        memset(packet, 0, sizeof(packet));
+
+        struct iphdr *iph = (struct iphdr *)packet;
+        struct tcphdr *tcph = (struct tcphdr *)(packet + sizeof(struct iphdr));
+
+        iph->ihl = 5;
+        iph->version = 4;
+        iph->tos = 0;
+        iph->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
+        iph->id = htons(54321);
+        iph->frag_off = 0;
+        iph->ttl = 64;
+        iph->protocol = IPPROTO_TCP;
+        iph->check = 0;
+        iph->saddr = src_addr;
+        iph->daddr = dst_addr;
+
+        iph->check = checksum((unsigned short *)packet, iph->ihl << 2);
+
+        tcph->source = htons(12345);
+        tcph->dest = htons(port);
+        tcph->seq = htonl(0);
+        tcph->ack_seq = 0;
+        tcph->doff = 5;
+        tcph->syn = 1;
+        tcph->window = htons(5840);
+        tcph->check = 0;
+        tcph->urg_ptr = 0;
+
+        pseudo_header psh{};
+        psh.src_addr = src_addr;
+        psh.dst_addr = dst_addr;
+        psh.placeholder = 0;
+        psh.protocol = IPPROTO_TCP;
+        psh.tcp_length = htons(sizeof(struct tcphdr));
+
+        char pseudo[sizeof(pseudo_header) + sizeof(struct tcphdr)];
+        memcpy(pseudo, &psh, sizeof(psh));
+        memcpy(pseudo + sizeof(psh), tcph, sizeof(struct tcphdr));
+
+        tcph->check = checksum((unsigned short*)pseudo, sizeof(pseudo));
+
+        if (sendto(raw_sock, packet, iph->tot_len, 0, (sockaddr*)&dst, sizeof(dst)) < 0) {
+            perror("sendto");
         }
 
-        struct iphdr *rip = (struct iphdr *)buffer;
-        if (rip->protocol != IPPROTO_TCP) continue;
+        scanned_ports.insert(port);
+    }
 
-        int ip_header_len = rip->ihl * 4;
-        struct tcphdr *rtcp = (struct tcphdr *)(buffer + ip_header_len);
+    auto start = std::chrono::steady_clock::now();
+    epoll_event events[64];
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        // Match correct source/dest IP and port
-        if (rip->saddr == ip->daddr && rip->daddr == ip->saddr &&
-            ntohs(rtcp->source) == port && ntohs(rtcp->dest) == source_port) {
+    // Receive the response
+    while (true) {
+        int nfds = epoll_wait(epfd, events, 64, 500);
+        auto now = std::chrono::steady_clock::now();
+        float elapsed = std::chrono::duration<float>(now - start).count();
 
-            if (rtcp->syn && rtcp->ack) {
-                std::cout << "[+] Found open port " << port << "/tcp on host " << s_ip << "\n";
-                close(sockfd);
-                return true;
-            } else if (rtcp->rst) {
-                close(sockfd);
-                return false;
+        if (elapsed > timeout_sec)
+            break;
+
+        for (int i = 0; i < nfds; ++i) {
+            if (events[i].data.fd == raw_sock) {
+                char buffer[4096];
+                sockaddr_in sender{};
+                socklen_t sender_len = sizeof(sender);
+                
+                while (true) {
+                    sockaddr_in sender{};
+                    socklen_t sender_len = sizeof(sender);
+                    int len = recvfrom(raw_sock, buffer, sizeof(buffer), 0, (sockaddr*)&sender, &sender_len);
+                    
+                    if (len < 0) {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                            break;
+                        continue;
+                    }
+
+                    struct iphdr *iph = (struct iphdr *)buffer;
+                    if (iph->protocol != IPPROTO_TCP) continue;
+
+                    int ip_header_len = iph->ihl * 4;
+                    if (len < ip_header_len + sizeof(tcphdr)) continue;
+
+                    struct tcphdr *tcph = (struct tcphdr *)(buffer + ip_header_len);
+
+                    if (tcph->syn && tcph->ack) {
+                        int sport = ntohs(tcph->source);
+                        if (scanned_ports.find(sport) != scanned_ports.end()) {
+                            open_ports.push_back(sport);
+                            scanned_ports.erase(sport);
+                        }
+                    }
+                }
             }
         }
     }
+
+    close(epfd);
+    close(raw_sock);
+    return open_ports;
 }
 
 bool IsHostUpICMP(const std::string& s_ip) {
