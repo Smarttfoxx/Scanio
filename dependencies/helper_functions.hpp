@@ -29,6 +29,9 @@
 #include <condition_variable>
 #include <string>
 #include <algorithm>
+#include <iostream>
+#include <fstream>
+#include <vector>
 
 // Custom libraries
 #include "../dependencies/log_system.h"
@@ -111,4 +114,27 @@ bool FindIn(std::vector<int>& list, int buf) {
         return false;
     
     return true;
+}
+
+std::vector<int> ReadFile(const std::string& filename) {
+    std::vector<int> output;
+    std::ifstream file(filename);
+    std::string line;
+
+    if (!file.is_open()){
+        logsys.Error("Could not open file.");
+        return output;
+    }
+
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        int n;
+
+        while (ss >> n) {
+            output.push_back(n);
+        }
+    }
+
+    file.close();
+    return output;
 }
