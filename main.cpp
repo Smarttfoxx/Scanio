@@ -38,9 +38,12 @@ int main(int argc, char* argv[]) {
     int servScan_timeout = 1;
     int threadAmount = 100;
 
+    bool isHostUp = false;
     bool enableFindService = false;
     bool enableTCPScan = false;
-    bool isHostUp = false;
+    bool enableARPScan = false;
+
+    std::string networkInterface;
 
     std::vector<HostInstance> HostInstances;
     std::vector<int> portsToScan;
@@ -140,6 +143,13 @@ int main(int argc, char* argv[]) {
         } else if (arg == "-Ts" || arg == "--tcp-scan") {
             enableTCPScan = true;
 
+        // Performs ARP scan
+        } else if (arg == "Ar" || arg == "--arp-scan") {
+            enableARPScan = true;
+
+        } else if ((arg == "--interface") && i + 1 < argc) {
+            networkInterface = argv[++i];
+
         // Set the amount of threads to be used
         } else if ((arg == "-Th" || arg == "--threads") && i + 1 < argc) {
             threadAmount = std::stoi(argv[++i]);
@@ -163,10 +173,17 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        if (IsHostUpICMP(HostObject.ipValue))
-            logsys.Info("The host", HostObject.ipValue, "is up");
-        else
-            logsys.Warning("The host is down or blocking ICMP. Continuing anyways...");
+        if (enableARPScan) {
+            if (IsHostUpARP(HostObject.ipValue, networkInterface))
+                logsys.Info("The host", HostObject.ipValue, "is up");
+            else
+                logsys.Warning("The host is down.");
+        } else {
+            if (IsHostUpICMP(HostObject.ipValue))
+                logsys.Info("The host", HostObject.ipValue, "is up");
+            else
+                logsys.Warning("The host is down or blocking ICMP. Continuing anyways...");
+        }
     }
 
     if (portsToScan.empty()) {

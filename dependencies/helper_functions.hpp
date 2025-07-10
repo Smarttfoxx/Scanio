@@ -135,6 +135,5 @@ std::vector<int> ReadFile(const std::string& filename) {
         }
     }
 
-    file.close();
     return output;
 }

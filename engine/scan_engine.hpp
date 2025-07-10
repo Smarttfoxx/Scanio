@@ -34,21 +34,29 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <iostream>
-#include <arpa/inet.h>
-#include <netinet/ip.h>
-#include <sys/socket.h>
-#include <sys/epoll.h>
-#include <sys/time.h>
-#include <netdb.h>
 #include <errno.h>
-#include <netinet/in.h>
-#include <netinet/ip_icmp.h>
-#include <netinet/tcp.h>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
 #include <atomic>
+
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/ip.h>
+#include <netinet/in.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
+#include <net/ethernet.h>
+#include <netpacket/packet.h>
+#include <net/if.h>
+#include <net/if_arp.h>
+#include <netinet/if_ether.h>
+
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <sys/time.h>
+#include <sys/ioctl.h>
 
 // Custom libraries
 #include "default_ports.h"
@@ -62,8 +70,8 @@ struct HostInstance {
 };
 
 struct pseudo_header {
-    uint32_t src_addr;
-    uint32_t dst_addr;
+    uint32_t sourceIP;
+    uint32_t targetIP;
     uint8_t placeholder;
     uint8_t protocol;
     uint16_t tcp_length;
@@ -311,19 +319,25 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
         sockaddr_in tmp_dst{};
         tmp_dst.sin_family = AF_INET;
         tmp_dst.sin_port = htons(53);
+
         inet_pton(AF_INET, ipValue.c_str(), &tmp_dst.sin_addr);
         connect(tmp_sock, (sockaddr*)&tmp_dst, sizeof(tmp_dst));
+
         sockaddr_in local_addr{};
         socklen_t len = sizeof(local_addr);
+
         getsockname(tmp_sock, (sockaddr*)&local_addr, &len);
+
         char buf[INET_ADDRSTRLEN];
+
         inet_ntop(AF_INET, &local_addr.sin_addr, buf, sizeof(buf));
+
         local_ip = buf;
         close(tmp_sock);
     }
 
-    uint32_t src_addr = inet_addr(local_ip.c_str());
-    uint32_t dst_addr = inet_addr(ipValue.c_str());
+    uint32_t sourceIP = inet_addr(local_ip.c_str());
+    uint32_t targetIP = inet_addr(ipValue.c_str());
 
     // Send SYN packets
     for (int port : ports) {
@@ -341,8 +355,8 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
         iph->ttl = 64;
         iph->protocol = IPPROTO_TCP;
         iph->check = 0;
-        iph->saddr = src_addr;
-        iph->daddr = dst_addr;
+        iph->saddr = sourceIP;
+        iph->daddr = targetIP;
 
         iph->check = checksum((unsigned short *)packet, iph->ihl << 2);
 
@@ -357,8 +371,8 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
         tcph->urg_ptr = 0;
 
         pseudo_header psh{};
-        psh.src_addr = src_addr;
-        psh.dst_addr = dst_addr;
+        psh.sourceIP = sourceIP;
+        psh.targetIP = targetIP;
         psh.placeholder = 0;
         psh.protocol = IPPROTO_TCP;
         psh.tcp_length = htons(sizeof(struct tcphdr));
@@ -473,6 +487,96 @@ bool IsHostUpICMP(const std::string& ipValue) {
 
     return received > 0;
 }
+
+bool IsHostUpARP(const std::string& ipValue, const std::string& interface) {
+    int sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
+    if (sockfd < 0) {
+        perror("socket");
+        return false;
+    }
+
+    struct ifreq ifr{};
+    strncpy(ifr.ifr_name, interface.c_str(), IFNAMSIZ - 1);
+    if (ioctl(sockfd, SIOCGIFINDEX, &ifr) == -1) {
+        perror("SIOCGIFINDEX");
+        close(sockfd);
+        return false;
+    }
+
+    int ifindex = ifr.ifr_ifindex;
+
+    if (ioctl(sockfd, SIOCGIFHWADDR, &ifr) == -1) {
+        perror("SIOCGIFHWADDR");
+        close(sockfd);
+        return false;
+    }
+
+    uint8_t src_mac[6];
+    memcpy(src_mac, ifr.ifr_hwaddr.sa_data, 6);
+
+    if (ioctl(sockfd, SIOCGIFADDR, &ifr) == -1) {
+        perror("SIOCGIFADDR");
+        close(sockfd);
+        return false;
+    }
+
+    uint32_t sourceIP = ((sockaddr_in*)&ifr.ifr_addr)->sin_addr.s_addr;
+    uint32_t targetIP = inet_addr(ipValue.c_str());
+
+    uint8_t buffer[42] = {};
+    struct ether_header *eth = (ether_header*)buffer;
+    struct ether_arp *arp = (ether_arp*)(buffer + ETH_HLEN);
+
+    // Ethernet header
+    memset(eth->ether_dhost, 0xFF, 6); // broadcast
+    memcpy(eth->ether_shost, src_mac, 6);
+    eth->ether_type = htons(ETH_P_ARP);
+
+    // ARP header
+    arp->ea_hdr.ar_hrd = htons(ARPHRD_ETHER);
+    arp->ea_hdr.ar_pro = htons(ETH_P_IP);
+    arp->ea_hdr.ar_hln = 6;
+    arp->ea_hdr.ar_pln = 4;
+    arp->ea_hdr.ar_op  = htons(ARPOP_REQUEST);
+    memcpy(arp->arp_sha, src_mac, 6);
+    memcpy(arp->arp_spa, &sourceIP, 4);
+    memset(arp->arp_tha, 0x00, 6);
+    memcpy(arp->arp_tpa, &targetIP, 4);
+
+    sockaddr_ll socket_address{};
+    socket_address.sll_ifindex = ifindex;
+    socket_address.sll_halen = ETH_ALEN;
+    memset(socket_address.sll_addr, 0xff, 6); // broadcast
+
+    if (sendto(sockfd, buffer, 42, 0, (sockaddr*)&socket_address, sizeof(socket_address)) < 0) {
+        perror("sendto");
+        close(sockfd);
+        return false;
+    }
+
+    // Wait for reply
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(sockfd, &fds);
+    timeval timeout = {1, 0}; // 1 second timeout
+
+    if (select(sockfd + 1, &fds, nullptr, nullptr, &timeout) > 0) {
+        uint8_t recv_buf[1500];
+        ssize_t len = recv(sockfd, recv_buf, sizeof(recv_buf), 0);
+        if (len >= 42) {
+            ether_arp* recv_arp = (ether_arp*)(recv_buf + ETH_HLEN);
+            if (ntohs(recv_arp->ea_hdr.ar_op) == ARPOP_REPLY &&
+                memcmp(recv_arp->arp_spa, &targetIP, 4) == 0) {
+                close(sockfd);
+                return true;
+            }
+        }
+    }
+
+    close(sockfd);
+    return false;
+}
+
 
 bool IsValidIP(const std::string& ipValue) {
     sockaddr_in addr;
