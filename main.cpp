@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
 
             if (IPValue.empty()) {
                 logsys.Warning("No IP provided.");
-                logsys.Info("Usage: scanio -i <IP> -p <PORT(s)> <options>");
+                logsys.Info("Usage: hugin -i <IP> -p <PORT(s)> <options>");
                 return 1;
             }
 
@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
         // If no valid argument was passed, exit.
         } else {
             logsys.Warning("Unknown argument was passed.");
-            logsys.Info("Usage: scanio -i <IP> -p <PORT(s)> <options>");
+            logsys.Info("Usage: hugin -i <IP> -p <PORT(s)> <options>");
             return 1;
         }
     }

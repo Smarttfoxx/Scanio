@@ -30,11 +30,11 @@
 #include "../dependencies/helper_functions.hpp"
 
 void RenderBanner() {
-    logsys.CommonText("Scanio - Network Scanner 1.0");
+    logsys.CommonText("Hugin - Network Scanner 1.0");
 }
 
 void RenderHelp() {
-    logsys.CommonText("Usage: scanio -i <IP> -p <PORT(s)> <options>");
+    logsys.CommonText("Usage: hugin -i <IP> -p <PORT(s)> <options>");
     logsys.CommonText("");
     logsys.CommonText("Required arguments:");
     logsys.CommonText("  -i,  --ip <IP>           Target IP address or addresses (comma-separated)");
@@ -52,7 +52,7 @@ void RenderHelp() {
 
     logsys.CommonText("");
     logsys.CommonText("Examples:");
-    logsys.CommonText("  scanio -i 192.168.1.1 -p 22,80,443 -S");
-    logsys.CommonText("  scanio -i 192.168.1.1,192.168.1.2 -Tp 100 -Ts");
-    logsys.CommonText("  scanio -i 10.0.0.5 -Ap -d 2 -Th 200");
+    logsys.CommonText("  hugin -i 192.168.1.1 -p 22,80,443 -S");
+    logsys.CommonText("  hugin -i 192.168.1.1,192.168.1.2 -Tp 100 -Ts");
+    logsys.CommonText("  hugin -i 10.0.0.5 -Ap -d 2 -Th 200");
 }
