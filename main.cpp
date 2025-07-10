@@ -29,10 +29,8 @@
 #include <functional>
 
 // Custom libraries
-#include "interfaces/banner.hpp"
+#include "interfaces/visuals.hpp"
 #include "engine/scan_engine.hpp"
-#include "dependencies/helper_functions.hpp"
-#include "dependencies/log_system.h"
 
 int main(int argc, char* argv[]) {
 
@@ -52,9 +50,7 @@ int main(int argc, char* argv[]) {
     std::atomic<int> scannedServicesCount{0};
     std::atomic<int> scannedPortsCount{0};
 
-    LogSystem log;
-
-    render_banner();
+    RenderBanner();
 
     // Check and process program arguments
     for (int i = 1; i < argc; ++i) {
@@ -76,8 +72,8 @@ int main(int argc, char* argv[]) {
                 HostInstances.emplace_back(HostInstance{IPValue});
 
             if (IPValue.empty()) {
-                log.Warning("No IP provided.");
-                log.Info("Usage: scanio -i <IP> -p <PORT(s)> <options>");
+                logsys.Warning("No IP provided.");
+                logsys.Info("Usage: scanio -i <IP> -p <PORT(s)> <options>");
                 return 1;
             }
 
@@ -154,22 +150,22 @@ int main(int argc, char* argv[]) {
 
         // If no valid argument was passed, exit.
         } else {
-            log.Warning("Unknown argument was passed.");
-            log.Info("Usage: scanio -i <IP> -p <PORT(s)> <options>");
+            logsys.Warning("Unknown argument was passed.");
+            logsys.Info("Usage: scanio -i <IP> -p <PORT(s)> <options>");
             return 1;
         }
     }
 
     for (const HostInstance& HostObject : HostInstances) {
         if (!IsValidIP(HostObject.ipValue)) {
-            log.Warning("Invalid address was provided.");
+            logsys.Warning("Invalid address was provided.");
             return 1;
         }
 
         if (IsHostUpICMP(HostObject.ipValue))
-            log.Info("The host", HostObject.ipValue, "is up");
+            logsys.Info("The host", HostObject.ipValue, "is up");
         else
-            log.Warning("The host is down or blocking ICMP. Continuing anyways...");
+            logsys.Warning("The host is down or blocking ICMP. Continuing anyways...");
     }
 
     if (portsToScan.empty()) {
@@ -179,12 +175,12 @@ int main(int argc, char* argv[]) {
     ThreadPool pool(threadAmount);
     auto scanStartTime = std::chrono::steady_clock::now();
 
-    log.Info("Using a total of", threadAmount, "threads for the scan.");
+    logsys.Info("Using a total of", threadAmount, "threads for the scan.");
 
     for (HostInstance& HostObject : HostInstances) {
         auto pOpenPorts = &HostObject.openPorts;
 
-        log.Info("Scanning for open ports on host", HostObject.ipValue);
+        logsys.Info("Scanning for open ports on host", HostObject.ipValue);
 
         if (enableTCPScan) {
             for (int port : portsToScan) {
@@ -200,13 +196,13 @@ int main(int argc, char* argv[]) {
             }
 
             while (scannedPortsCount.load() < portsToScan.size())
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                ts.SleepMilliseconds(500);
 
             scannedPortsCount = 0;
         } else {
             std::vector<int> openPort = PortScanSyn(HostObject.ipValue, portsToScan, portScan_timeout);
 
-            log.Info("Scanning", portsToScan.size(), "ports via SYN.");
+            logsys.Info("Scanning", portsToScan.size(), "ports via SYN.");
 
             if (!openPort.empty()) {
                 std::lock_guard<std::mutex> lock(result_mutex);
@@ -214,16 +210,16 @@ int main(int argc, char* argv[]) {
                 isHostUp = true;
 
                 for (int port : openPort)
-                    log.NewEvent("Found open port", port, "/tcp on host", HostObject.ipValue);
+                    logsys.NewEvent("Found open port", port, "/tcp on host", HostObject.ipValue);
             } else
-                log.Warning("No open ports found via SYN.");
+                logsys.Warning("No open ports found via SYN.");
         }
 
         if (!isHostUp)
-            log.Warning("No open ports were found, is the host online?");
+            logsys.Warning("No open ports were found, is the host online?");
 
         if (enableFindService && !(HostObject.openPorts.empty())) {
-            log.Info("Starting service scanner on host", HostObject.ipValue);
+            logsys.Info("Starting service scanner on host", HostObject.ipValue);
             
             std::cout << std::left;
             std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
@@ -254,7 +250,7 @@ int main(int argc, char* argv[]) {
             }
 
             while (scannedServicesCount.load() < HostObject.openPorts.size())
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                ts.SleepMilliseconds(500);
 
             if (scannedServicesCount.load() >= HostObject.openPorts.size())
                 scannedServicesCount = 0;
@@ -264,8 +260,8 @@ int main(int argc, char* argv[]) {
     auto scanEndTime = std::chrono::steady_clock::now();
     auto scanElapsedTime = std::chrono::duration_cast<std::chrono::seconds>(scanEndTime - scanStartTime).count();
 
-    log.Info("Scan completed in", scanElapsedTime, "seconds.");
-    log.Info("A total of", portsToScan.size(), "ports were scanned.");
+    logsys.Info("Scan completed in", scanElapsedTime, "seconds.");
+    logsys.Info("A total of", portsToScan.size(), "ports were scanned.");
 
     return 0;
 }

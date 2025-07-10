@@ -52,6 +52,7 @@
 
 // Custom libraries
 #include "default_ports.h"
+#include "../dependencies/helper_functions.hpp"
 
 struct HostInstance {
     const std::string ipValue;
@@ -107,7 +108,7 @@ unsigned short checksum(void* b, int len) {
     return result;
 }
 
-std::string GetLocalIP(const std::string& s_ip) {
+std::string GetLocalIP(const std::string& ipValue) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
         return "";
@@ -116,7 +117,7 @@ std::string GetLocalIP(const std::string& s_ip) {
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(53);
 
-    inet_pton(AF_INET, s_ip.c_str(), &dest_addr.sin_addr);
+    inet_pton(AF_INET, ipValue.c_str(), &dest_addr.sin_addr);
     connect(sockfd, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
     struct sockaddr_in local_addr = {};
@@ -132,13 +133,13 @@ std::string GetLocalIP(const std::string& s_ip) {
 
 }
 
-std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_sec) {
+std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeoutValue) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
         return "";
 
     struct timeval timeout;
-    timeout.tv_sec = timeout_sec;
+    timeout.tv_sec = timeoutValue;
     timeout.tv_usec = 0;
 
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
@@ -146,7 +147,7 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    inet_pton(AF_INET, s_ip.c_str(), &addr.sin_addr);
+    inet_pton(AF_INET, ipValue.c_str(), &addr.sin_addr);
 
     if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) != 0) {
         close(sockfd);
@@ -213,7 +214,7 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
         }
 
         auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed > std::chrono::seconds(timeout_sec))
+        if (elapsed > std::chrono::seconds(timeoutValue))
             break;
         
         if (bytes == 0 || (bytes < 0 && errno != EWOULDBLOCK && errno != EAGAIN))
@@ -230,7 +231,7 @@ std::string ServiceBannerGrabber(const std::string& s_ip, int port, int timeout_
     return !banner.empty() ? banner : "";
 }
 
-bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
+bool IsPortOpenTcp(const std::string& ipValue, int port, int timeoutValue) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0)
@@ -238,7 +239,7 @@ bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
 
     // Set socket timeout
     struct timeval timeout;
-    timeout.tv_sec = timeout_sec;
+    timeout.tv_sec = timeoutValue;
     timeout.tv_usec = 0;
 
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
@@ -247,10 +248,10 @@ bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
     sockaddr_in addr {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    inet_pton(AF_INET, s_ip.c_str(), &addr.sin_addr);
+    inet_pton(AF_INET, ipValue.c_str(), &addr.sin_addr);
 
     if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) == 0) {
-        std::cout << "[+] Found open port " << port << "/tcp on host " << s_ip << "\n";
+        logsys.NewEvent("Found open port", port, "/tcp on host", ipValue);
         close(sockfd);
         return true;
     }
@@ -260,7 +261,7 @@ bool IsPortOpenTcp(const std::string& s_ip, int port, int timeout_sec) {
     return false;
 }
 
-std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int>& ports, float timeout_sec) {
+std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>& ports, float timeoutValue) {
     std::vector<int> open_ports;
     std::unordered_set<int> scanned_ports;
     std::unordered_map<int, int> port_map;
@@ -300,7 +301,7 @@ std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int
 
     sockaddr_in dst{};
     dst.sin_family = AF_INET;
-    inet_pton(AF_INET, target_ip.c_str(), &dst.sin_addr);
+    inet_pton(AF_INET, ipValue.c_str(), &dst.sin_addr);
 
     char packet[4096];
 
@@ -310,7 +311,7 @@ std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int
         sockaddr_in tmp_dst{};
         tmp_dst.sin_family = AF_INET;
         tmp_dst.sin_port = htons(53);
-        inet_pton(AF_INET, target_ip.c_str(), &tmp_dst.sin_addr);
+        inet_pton(AF_INET, ipValue.c_str(), &tmp_dst.sin_addr);
         connect(tmp_sock, (sockaddr*)&tmp_dst, sizeof(tmp_dst));
         sockaddr_in local_addr{};
         socklen_t len = sizeof(local_addr);
@@ -322,7 +323,7 @@ std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int
     }
 
     uint32_t src_addr = inet_addr(local_ip.c_str());
-    uint32_t dst_addr = inet_addr(target_ip.c_str());
+    uint32_t dst_addr = inet_addr(ipValue.c_str());
 
     // Send SYN packets
     for (int port : ports) {
@@ -385,7 +386,7 @@ std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int
         auto now = std::chrono::steady_clock::now();
         float elapsed = std::chrono::duration<float>(now - start).count();
 
-        if (elapsed > timeout_sec)
+        if (elapsed > timeoutValue)
             break;
 
         for (int i = 0; i < nfds; ++i) {
@@ -430,12 +431,12 @@ std::vector<int> PortScanSyn(const std::string& target_ip, const std::vector<int
     return open_ports;
 }
 
-bool IsHostUpICMP(const std::string& s_ip) {
+bool IsHostUpICMP(const std::string& ipValue) {
 
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
 
     if (sockfd < 0) {
-        std::cerr << "[!] Operation not permitted. Please run as root.\n";
+        logsys.Warning("Operation not permitted. Please run as root.");
         exit(1);
     }
 
@@ -444,7 +445,7 @@ bool IsHostUpICMP(const std::string& s_ip) {
 
     sockaddr_in addr {};
     addr.sin_family = AF_INET;
-    inet_pton(AF_INET, s_ip.c_str(), &addr.sin_addr);
+    inet_pton(AF_INET, ipValue.c_str(), &addr.sin_addr);
 
     char packet[64];
     memset(packet, 0, sizeof(packet));
@@ -473,8 +474,8 @@ bool IsHostUpICMP(const std::string& s_ip) {
     return received > 0;
 }
 
-bool IsValidIP(const std::string& s_ip) {
+bool IsValidIP(const std::string& ipValue) {
     sockaddr_in addr;
 
-    return inet_pton(AF_INET, s_ip.c_str(), &(addr.sin_addr)) == 1;
+    return inet_pton(AF_INET, ipValue.c_str(), &(addr.sin_addr)) == 1;
 }

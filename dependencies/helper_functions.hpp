@@ -23,10 +23,22 @@
 
 #pragma once
 
+// C++ libraries
 #include <sstream>
 #include <mutex>
 #include <condition_variable>
 #include <string>
+#include <algorithm>
+
+// Custom libraries
+#include "../dependencies/log_system.h"
+
+struct ThreadSleep {
+    void SleepMilliseconds(int value) {
+        return std::this_thread::sleep_for(std::chrono::milliseconds(value));
+    }
+};
+ThreadSleep ts;
 
 class ThreadPool {
 public:
@@ -81,12 +93,12 @@ bool isInteger(const std::string& str) {
     char c;
 
     if (!(iss >> num)) {
-        std::cout << "[!] Invalid port value. Only integers are accepted.\n";
+        logsys.Warning("Invalid port value. Only integers are accepted.");
         return false;
     }
 
     if (iss >> c) {
-        std::cout << "[!] Invalid port value. Only integers are accepted.\n";
+        logsys.Warning("Invalid port value. Only integers are accepted.");
         return false;
     }
 
