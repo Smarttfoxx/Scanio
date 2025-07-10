@@ -19,13 +19,13 @@
 
 ### Requirements
 
-- C++17 or later
+- C++20 or later
 - Linux (raw sockets and ICMP scanning rely on POSIX features)
 
 ### Compilation
 
 ```bash
-g++ -std=c++17 main.cpp -o scanio -lpthread
+g++ -std=c++20 main.cpp -o scanio -lpthread
 ```
 
 ---
