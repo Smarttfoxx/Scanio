@@ -146,7 +146,8 @@ int main(int argc, char* argv[]) {
 
         // Print the help section
         } else if (arg == "-h" || arg == "--help") {
-            //std::cout << ;
+            RenderHelp();
+            return 1;
 
         // If no valid argument was passed, exit.
         } else {

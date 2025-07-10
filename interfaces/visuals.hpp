@@ -29,6 +29,30 @@
 // Custom libraries
 #include "../dependencies/helper_functions.hpp"
 
-inline void RenderBanner() {
-    logsys.Info("Initializing Scanio - Network Scanner 1.0");
+void RenderBanner() {
+    logsys.CommonText("Scanio - Network Scanner 1.0");
+}
+
+void RenderHelp() {
+    logsys.CommonText("Usage: scanio -i <IP> -p <PORT(s)> <options>");
+    logsys.CommonText("");
+    logsys.CommonText("Required arguments:");
+    logsys.CommonText("  -i,  --ip <IP>           Target IP address or addresses (comma-separated)");
+    logsys.CommonText("  -p,  --ports <PORT(s)>   Ports to scan (e.g., 80,443 or 1-100)");
+
+    logsys.CommonText("");
+    logsys.CommonText("Optional arguments:");
+    logsys.CommonText("  -d,  --delay <seconds>   Set timeout delay per port (default: 1)");
+    logsys.CommonText("  -S,  --service           Enable service banner grabbing");
+    logsys.CommonText("  -Tp, --top-ports <N>     Scan top N common ports (e.g., 100)");
+    logsys.CommonText("  -Ap, --all-ports         Scan all 65535 TCP ports");
+    logsys.CommonText("  -Ts, --tcp-scan          Use TCP connect scan instead of SYN scan");
+    logsys.CommonText("  -Th, --threads <N>       Set number of threads to use (default: 100)");
+    logsys.CommonText("  -h,  --help              Display this help message");
+
+    logsys.CommonText("");
+    logsys.CommonText("Examples:");
+    logsys.CommonText("  scanio -i 192.168.1.1 -p 22,80,443 -S");
+    logsys.CommonText("  scanio -i 192.168.1.1,192.168.1.2 -Tp 100 -Ts");
+    logsys.CommonText("  scanio -i 10.0.0.5 -Ap -d 2 -Th 200");
 }

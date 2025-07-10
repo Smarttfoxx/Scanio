@@ -34,24 +34,32 @@ struct LogSystem {
     }
 
     template<typename... Args>
-        void Warning(const char* message, Args&&... args) {
+    void Warning(const char* message, Args&&... args) {
         std::cout << "[!] " << message;
         ((std::cout << ' ' << std::forward<Args>(args)), ...);
         std::cout << std::endl;
     }
 
     template<typename... Args>
-        void Info(const char* message, Args&&... args) {
+    void Info(const char* message, Args&&... args) {
         std::cout << "[*] " << message;
         ((std::cout << ' ' << std::forward<Args>(args)), ...);
         std::cout << std::endl;
     }
 
     template<typename... Args>
-        void NewEvent(const char* message, Args&&... args) {
+    void NewEvent(const char* message, Args&&... args) {
         std::cout << "[+] " << message;
         ((std::cout << ' ' << std::forward<Args>(args)), ...);
         std::cout << std::endl;
     }
+
+    template<typename... Args>
+    void CommonText(const char* message, Args&&... args) {
+        std::cout << message;
+        ((std::cout << ' ' << std::forward<Args>(args)), ...);
+        std::cout << std::endl;
+    }
+
 };
 LogSystem logsys;
