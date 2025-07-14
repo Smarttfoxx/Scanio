@@ -92,7 +92,8 @@ int main(int argc, char* argv[]) {
                     hostAmount = 0;
 
                 for (int i = 1; i <= hostAmount; ++i) {
-                    uint32_t hostIP = (baseIP & 0xFFFFFF00) | i;
+                    uint32_t subnetMask = ~((1u << (32 - subnetBits)) - 1);
+                    uint32_t hostIP = (baseIP & subnetMask) + i;
                     addr.s_addr = htonl(hostIP);
                     char ipString[INET_ADDRSTRLEN];
                     inet_ntop(AF_INET, &addr, ipString, INET_ADDRSTRLEN);
