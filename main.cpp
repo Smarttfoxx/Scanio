@@ -264,7 +264,7 @@ int main(int argc, char* argv[]) {
                 isHostUp = true;
 
                 for (int port : openPort)
-                    logsys.NewEvent("Found open port", port, "/tcp on host", HostObject.ipValue);
+                    logsys.NewEvent("Found open port", (std::to_string(port) + "/tcp on host"), HostObject.ipValue);
             } else
                 logsys.Warning("No open ports found via SYN.");
         }
@@ -273,12 +273,12 @@ int main(int argc, char* argv[]) {
             logsys.Warning("No open ports were found, is the host online?");
 
         if (enableFindService || enableNSEScan && !(HostObject.openPorts.empty())) {
+            logsys.Info("Starting service scanner on host", HostObject.ipValue);
+            
+            std::cout << std::left;
+            std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
             for (int port : HostObject.openPorts) {
                 if (!enableNSEScan) {
-                    logsys.Info("Starting service scanner on host", HostObject.ipValue);
-            
-                    std::cout << std::left;
-                    std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
                     // If the service is FTP, increase wait time to grab header
                     if (FindIn(common_ftp_ports, port))
                         servScan_timeout = 12;
@@ -301,12 +301,6 @@ int main(int argc, char* argv[]) {
                         }
                         scannedServicesCount++;
                     });
-
-                    while (scannedServicesCount.load() < HostObject.openPorts.size())
-                        ts.SleepMilliseconds(500);
-
-                    if (scannedServicesCount.load() >= HostObject.openPorts.size())
-                        scannedServicesCount = 0;
                 } else {
                     for (const std::string& script : luaScripts) {
                         logsys.Info("Running script", script, "on", HostObject.ipValue, "port", port);
@@ -314,6 +308,11 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+            while (scannedServicesCount.load() < HostObject.openPorts.size())
+                ts.SleepMilliseconds(500);
+
+            if (scannedServicesCount.load() >= HostObject.openPorts.size())
+                scannedServicesCount = 0;
         }
     }
 

@@ -151,22 +151,19 @@ std::string GetLocalIP(const std::string& ipValue) {
 
 }
 
-inline bool EnumerateLDAP(const std::string& host, int port, std::ostream& out) {
+bool EnumerateLDAP(const std::string& host, int port) {
     std::string uri = "ldap://" + host + ":" + std::to_string(port);
     LDAP* ld = nullptr;
 
     int rc = ldap_initialize(&ld, uri.c_str());
-    if (rc != LDAP_SUCCESS) {
-        out << "[LDAP] Error: ldap_initialize failed: " << ldap_err2string(rc) << "\n";
+    if (rc != LDAP_SUCCESS)
         return false;
-    }
 
     int version = 3;
     ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &version);
 
     rc = ldap_simple_bind_s(ld, nullptr, nullptr);
     if (rc != LDAP_SUCCESS) {
-        out << "[LDAP] Error: Bind failed: " << ldap_err2string(rc) << "\n";
         ldap_unbind_ext_s(ld, nullptr, nullptr);
         return false;
     }
@@ -174,7 +171,6 @@ inline bool EnumerateLDAP(const std::string& host, int port, std::ostream& out) 
     LDAPMessage* result = nullptr;
     rc = ldap_search_ext_s(ld, "", LDAP_SCOPE_BASE, "(objectClass=*)", nullptr, 0, nullptr, nullptr, nullptr, 0, &result);
     if (rc != LDAP_SUCCESS) {
-        out << "[LDAP] Error: Search failed: " << ldap_err2string(rc) << "\n";
         ldap_msgfree(result);
         ldap_unbind_ext_s(ld, nullptr, nullptr);
         return false;
@@ -182,13 +178,12 @@ inline bool EnumerateLDAP(const std::string& host, int port, std::ostream& out) 
 
     LDAPMessage* entry = ldap_first_entry(ld, result);
     if (!entry) {
-        out << "[LDAP] Error: No entries returned from root DSE\n";
         ldap_msgfree(result);
         ldap_unbind_ext_s(ld, nullptr, nullptr);
         return false;
     }
 
-    out << "[LDAP] RootDSE Attributes:\n";
+    std::string domain, site, dcHost;
 
     BerElement* ber = nullptr;
     for (char* attr = ldap_first_attribute(ld, entry, &ber); attr != nullptr;
@@ -196,10 +191,23 @@ inline bool EnumerateLDAP(const std::string& host, int port, std::ostream& out) 
 
         berval** vals = ldap_get_values_len(ld, entry, attr);
         if (vals) {
-            out << "  - " << attr << ":\n";
-            for (int i = 0; vals[i] != nullptr; ++i) {
-                out << "      " << std::string(vals[i]->bv_val, vals[i]->bv_len) << "\n";
+            if (strcmp(attr, "defaultNamingContext") == 0)
+                domain.assign(vals[0]->bv_val, vals[0]->bv_len);
+
+            if (strcmp(attr, "serverName") == 0) {
+                std::string full(vals[0]->bv_val, vals[0]->bv_len);
+                size_t siteStart = full.find("CN=Servers,");
+                if (siteStart != std::string::npos) {
+                    size_t siteNameStart = full.find("CN=", siteStart + 11);
+                    size_t siteNameEnd = full.find(",", siteNameStart);
+                    if (siteNameStart != std::string::npos && siteNameEnd != std::string::npos)
+                        site = full.substr(siteNameStart + 3, siteNameEnd - siteNameStart - 3);
+                }
             }
+
+            if (strcmp(attr, "dnsHostName") == 0)
+                dcHost.assign(vals[0]->bv_val, vals[0]->bv_len);
+
             ldap_value_free_len(vals);
         }
         ldap_memfree(attr);
@@ -208,16 +216,36 @@ inline bool EnumerateLDAP(const std::string& host, int port, std::ostream& out) 
     if (ber) ber_free(ber, 0);
     ldap_msgfree(result);
     ldap_unbind_ext_s(ld, nullptr, nullptr);
-    return true;
+
+    if (!domain.empty()) {
+        std::string domainFlat = domain;
+        std::replace(domainFlat.begin(), domainFlat.end(), ',', '.');
+        std::replace(domainFlat.begin(), domainFlat.end(), '=', '.');
+        while (domainFlat.find("DC.") != std::string::npos)
+            domainFlat.replace(domainFlat.find("DC."), 3, "");
+
+        std::stringstream stream;
+        stream << std::left 
+               << std::setw(12) << (std::to_string(port) + "/tcp")
+               << std::setw(8) << "open"
+               << "ldap - Microsoft Windows Active Directory LDAP (Domain: " << domainFlat;
+
+        if (!site.empty())
+            stream << ", Site: " << site;
+        stream << ")";
+
+        logsys.CommonText(stream.str().c_str());
+        logsys.CommonText("Service Info: Host:", dcHost.empty() ? "Unknown" : dcHost, "; OS: Windows; CPE: cpe:/o:microsoft:windows");
+
+        return true;
+    }
+
+    return false;
 }
 
 std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeoutValue) {
-    if (port == 389 || port == 636) {
-        std::cout << "[*] Attempting LDAP enumeration...\n";
-        if (!EnumerateLDAP(ipValue, port, std::cout)) {
-            std::cout << "LDAP enumeration failed.\n";
-        }
-    }
+    if (port == 389 || port == 636 || port == 3268 || port == 3269)
+        EnumerateLDAP(ipValue, port);
     
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
