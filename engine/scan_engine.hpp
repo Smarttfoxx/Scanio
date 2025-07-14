@@ -65,6 +65,9 @@ extern "C" {
 #include <sys/time.h>
 #include <sys/ioctl.h>
 
+#define LDAP_DEPRECATED 1
+#include <ldap.h>
+
 // Custom libraries
 #include "default_ports.h"
 #include "../dependencies/helper_functions.hpp"
@@ -148,7 +151,74 @@ std::string GetLocalIP(const std::string& ipValue) {
 
 }
 
+inline bool EnumerateLDAP(const std::string& host, int port, std::ostream& out) {
+    std::string uri = "ldap://" + host + ":" + std::to_string(port);
+    LDAP* ld = nullptr;
+
+    int rc = ldap_initialize(&ld, uri.c_str());
+    if (rc != LDAP_SUCCESS) {
+        out << "[LDAP] Error: ldap_initialize failed: " << ldap_err2string(rc) << "\n";
+        return false;
+    }
+
+    int version = 3;
+    ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &version);
+
+    rc = ldap_simple_bind_s(ld, nullptr, nullptr);
+    if (rc != LDAP_SUCCESS) {
+        out << "[LDAP] Error: Bind failed: " << ldap_err2string(rc) << "\n";
+        ldap_unbind_ext_s(ld, nullptr, nullptr);
+        return false;
+    }
+
+    LDAPMessage* result = nullptr;
+    rc = ldap_search_ext_s(ld, "", LDAP_SCOPE_BASE, "(objectClass=*)", nullptr, 0, nullptr, nullptr, nullptr, 0, &result);
+    if (rc != LDAP_SUCCESS) {
+        out << "[LDAP] Error: Search failed: " << ldap_err2string(rc) << "\n";
+        ldap_msgfree(result);
+        ldap_unbind_ext_s(ld, nullptr, nullptr);
+        return false;
+    }
+
+    LDAPMessage* entry = ldap_first_entry(ld, result);
+    if (!entry) {
+        out << "[LDAP] Error: No entries returned from root DSE\n";
+        ldap_msgfree(result);
+        ldap_unbind_ext_s(ld, nullptr, nullptr);
+        return false;
+    }
+
+    out << "[LDAP] RootDSE Attributes:\n";
+
+    BerElement* ber = nullptr;
+    for (char* attr = ldap_first_attribute(ld, entry, &ber); attr != nullptr;
+         attr = ldap_next_attribute(ld, entry, ber)) {
+
+        berval** vals = ldap_get_values_len(ld, entry, attr);
+        if (vals) {
+            out << "  - " << attr << ":\n";
+            for (int i = 0; vals[i] != nullptr; ++i) {
+                out << "      " << std::string(vals[i]->bv_val, vals[i]->bv_len) << "\n";
+            }
+            ldap_value_free_len(vals);
+        }
+        ldap_memfree(attr);
+    }
+
+    if (ber) ber_free(ber, 0);
+    ldap_msgfree(result);
+    ldap_unbind_ext_s(ld, nullptr, nullptr);
+    return true;
+}
+
 std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeoutValue) {
+    if (port == 389 || port == 636) {
+        std::cout << "[*] Attempting LDAP enumeration...\n";
+        if (!EnumerateLDAP(ipValue, port, std::cout)) {
+            std::cout << "LDAP enumeration failed.\n";
+        }
+    }
+    
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
         return "";

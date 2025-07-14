@@ -137,3 +137,10 @@ std::vector<int> ReadFile(const std::string& filename) {
 
     return output;
 }
+
+std::vector<uint8_t> hexToBytes(const std::string& hex) {
+    std::vector<uint8_t> bytes;
+    for (size_t i = 0; i < hex.length(); i += 2)
+        bytes.push_back(static_cast<uint8_t>(strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
+    return bytes;
+}
