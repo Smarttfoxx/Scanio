@@ -42,11 +42,13 @@ int main(int argc, char* argv[]) {
     bool enableFindService = false;
     bool enableTCPScan = false;
     bool enableARPScan = false;
+    bool enableNSEScan = false;
 
     std::string networkInterface;
 
     std::vector<HostInstance> HostInstances;
     std::vector<int> portsToScan;
+    std::vector<std::string> luaScripts;
 
     std::mutex result_mutex;
 
@@ -183,6 +185,11 @@ int main(int argc, char* argv[]) {
         } else if ((arg == "-Th" || arg == "--threads") && i + 1 < argc) {
             threadAmount = std::stoi(argv[++i]);
 
+        } else if ((arg == "-N" || arg == "--nse-script") && i + 1 < argc) {
+            enableNSEScan = true;
+            std::string scriptPath = argv[++i];
+            luaScripts.push_back(scriptPath);
+
         // Print the help section
         } else if (arg == "-h" || arg == "--help") {
             RenderHelp();
@@ -265,42 +272,48 @@ int main(int argc, char* argv[]) {
         if (!isHostUp)
             logsys.Warning("No open ports were found, is the host online?");
 
-        if (enableFindService && !(HostObject.openPorts.empty())) {
-            logsys.Info("Starting service scanner on host", HostObject.ipValue);
-            
-            std::cout << std::left;
-            std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
-
+        if (enableFindService || enableNSEScan && !(HostObject.openPorts.empty())) {
             for (int port : HostObject.openPorts) {
-                // If the service is FTP, increase wait time to grab header
-                if (FindIn(common_ftp_ports, port))
-                    servScan_timeout = 12;
-    
-                pool.enqueue([&, port]() {
-                    std::string s_service_banner;
-                    bool isPortOpen = true;
-                    
-                    s_service_banner = ServiceBannerGrabber(HostObject.ipValue, port, servScan_timeout);
+                if (!enableNSEScan) {
+                    logsys.Info("Starting service scanner on host", HostObject.ipValue);
+            
+                    std::cout << std::left;
+                    std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
+                    // If the service is FTP, increase wait time to grab header
+                    if (FindIn(common_ftp_ports, port))
+                        servScan_timeout = 12;
+        
+                    pool.enqueue([&, port]() {
+                        std::string s_service_banner;
+                        bool isPortOpen = true;
+                        
+                        s_service_banner = ServiceBannerGrabber(HostObject.ipValue, port, servScan_timeout);
 
-                    if (s_service_banner.empty())
-                        isPortOpen = false;
+                        if (s_service_banner.empty())
+                            isPortOpen = false;
 
-                    if (isPortOpen) {
-                        std::lock_guard<std::mutex> lock(result_mutex);
-                        std::cout << std::setw(12) << (std::to_string(port) + "/tcp") 
-                                << std::setw(8) << "open" 
-                                << (s_service_banner.empty() ? "No service found." : s_service_banner) 
-                                << "\n";
+                        if (isPortOpen) {
+                            std::lock_guard<std::mutex> lock(result_mutex);
+                            std::cout << std::setw(12) << (std::to_string(port) + "/tcp") 
+                                    << std::setw(8) << "open" 
+                                    << (s_service_banner.empty() ? "No service found." : s_service_banner) 
+                                    << "\n";
+                        }
+                        scannedServicesCount++;
+                    });
+
+                    while (scannedServicesCount.load() < HostObject.openPorts.size())
+                        ts.SleepMilliseconds(500);
+
+                    if (scannedServicesCount.load() >= HostObject.openPorts.size())
+                        scannedServicesCount = 0;
+                } else {
+                    for (const std::string& script : luaScripts) {
+                        logsys.Info("Running script", script, "on", HostObject.ipValue, "port", port);
+                        RunLuaScript(script, HostObject.ipValue, port);
                     }
-                    scannedServicesCount++;
-                });
+                }
             }
-
-            while (scannedServicesCount.load() < HostObject.openPorts.size())
-                ts.SleepMilliseconds(500);
-
-            if (scannedServicesCount.load() >= HostObject.openPorts.size())
-                scannedServicesCount = 0;
         }
     }
 

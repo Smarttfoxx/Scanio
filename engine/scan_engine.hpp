@@ -23,6 +23,13 @@
 
 #pragma once
 
+// Support for lua scripting
+extern "C" {
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+}
+
 // C++ libraries
 #include <vector>
 #include <unordered_set>
@@ -582,4 +589,24 @@ bool IsValidIP(const std::string& ipValue) {
     sockaddr_in addr;
 
     return inet_pton(AF_INET, ipValue.c_str(), &(addr.sin_addr)) == 1;
+}
+
+bool RunLuaScript(const std::string& scriptPath, const std::string& targetIP, int port) {
+    lua_State* L = luaL_newstate();
+    luaL_openlibs(L);
+
+    lua_pushstring(L, targetIP.c_str());
+    lua_setglobal(L, "target_ip");
+
+    lua_pushinteger(L, port);
+    lua_setglobal(L, "target_port");
+
+    if (luaL_dofile(L, scriptPath.c_str()) != LUA_OK) {
+        logsys.Error("Lua error in", scriptPath, ":", lua_tostring(L, -1));
+        lua_close(L);
+        return false;
+    }
+
+    lua_close(L);
+    return true;
 }
