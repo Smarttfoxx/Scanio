@@ -71,6 +71,34 @@ int main(int argc, char* argv[]) {
                 while (std::getline(ss, buffer, ',')) {
                     HostInstances.emplace_back(HostInstance{buffer});
                 }
+            } else if (IPValue.find('/') != std::string::npos) {
+                std::string ipPart;
+                std::getline(ss, ipPart, '/');
+                std::getline(ss, buffer, '/');
+                int subnetBits = std::stoi(buffer);
+                int hostAmount = 0;
+
+                in_addr addr{};
+                inet_pton(AF_INET, ipPart.c_str(), &addr);
+                uint32_t baseIP = ntohl(addr.s_addr);
+
+                if (subnetBits >= 1 && subnetBits <= 30)
+                    hostAmount = (1u << (32 - subnetBits)) - 2;
+                else if (subnetBits == 31)
+                    hostAmount = 2;
+                else if (subnetBits == 32)
+                    hostAmount = 1;
+                else
+                    hostAmount = 0;
+
+                for (int i = 1; i <= hostAmount; ++i) {
+                    uint32_t hostIP = (baseIP & 0xFFFFFF00) | i;
+                    addr.s_addr = htonl(hostIP);
+                    char ipString[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &addr, ipString, INET_ADDRSTRLEN);
+                    HostInstances.emplace_back(HostInstance(std::string(ipString)));
+                }
+
             } else
                 HostInstances.emplace_back(HostInstance{IPValue});
 
