@@ -20,7 +20,7 @@
 ### Requirements
 
 - C++20 or later
-- Linux (raw sockets and ICMP scanning rely on POSIX features)
+- Linux
 
 ### Compilation
 
