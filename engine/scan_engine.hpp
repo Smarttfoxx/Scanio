@@ -87,6 +87,12 @@ struct pseudo_header {
     uint16_t tcp_length;
 };
 
+/**
+ * Calculates the Internet checksum for a buffer of bytes.
+ * @param ptr Pointer to the data buffer.
+ * @param nbytes Number of bytes in the buffer.
+ * @return The computed checksum.
+ */
 unsigned short checksum(unsigned short *ptr, int nbytes) {
     long sum = 0;
     unsigned short oddbyte;
@@ -108,6 +114,12 @@ unsigned short checksum(unsigned short *ptr, int nbytes) {
     return (unsigned short)(~sum);
 }
 
+/**
+ * Overloaded version of checksum function using a void pointer.
+ * @param b Pointer to the data buffer.
+ * @param len Length of the data in bytes.
+ * @return The computed checksum.
+ */
 unsigned short checksum(void* b, int len) {
     unsigned short* buf = static_cast<unsigned short*>(b);
     unsigned int sum = 0;
@@ -126,6 +138,11 @@ unsigned short checksum(void* b, int len) {
     return result;
 }
 
+/**
+ * Determines the local IP address used to reach a specified remote IP.
+ * @param ipValue The target IP address.
+ * @return Local IP address as a string.
+ */
 std::string GetLocalIP(const std::string& ipValue) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
@@ -151,6 +168,13 @@ std::string GetLocalIP(const std::string& ipValue) {
 
 }
 
+/**
+ * Connects to an LDAP server and attempts to enumerate the domain, site, and hostname.
+ * Prints results if enumeration is successful.
+ * @param host Target IP address or hostname.
+ * @param port LDAP port (typically 389 or 636).
+ * @return True if enumeration was successful, false otherwise.
+ */
 bool EnumerateLDAP(const std::string& host, int port) {
     std::string uri = "ldap://" + host + ":" + std::to_string(port);
     LDAP* ld = nullptr;
@@ -243,6 +267,13 @@ bool EnumerateLDAP(const std::string& host, int port) {
     return false;
 }
 
+/**
+ * Connects to a TCP port and attempts to grab a service banner.
+ * @param ipValue IP address of the target.
+ * @param port Target port number.
+ * @param timeoutValue Connection timeout in seconds.
+ * @return Banner string or empty if none was received.
+ */
 std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeoutValue) {
     if (port == 389 || port == 636 || port == 3268 || port == 3269)
         EnumerateLDAP(ipValue, port);
@@ -344,6 +375,13 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
     return !banner.empty() ? banner : "";
 }
 
+/**
+ * Checks if a TCP port is open by attempting a full connection.
+ * @param ipValue IP address of the target.
+ * @param port Target port.
+ * @param timeoutValue Timeout in seconds.
+ * @return True if port is open, false otherwise.
+ */
 bool IsPortOpenTcp(const std::string& ipValue, int port, int timeoutValue) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -374,6 +412,14 @@ bool IsPortOpenTcp(const std::string& ipValue, int port, int timeoutValue) {
     return false;
 }
 
+/**
+ * Performs a TCP SYN scan using raw sockets and epoll for asynchronous response detection.
+ * Sends crafted SYN packets and listens for SYN-ACK replies.
+ * @param ipValue Target IP address.
+ * @param ports List of ports to scan.
+ * @param timeoutValue Timeout for receiving responses.
+ * @return Vector of ports that responded with SYN-ACK (open).
+ */
 std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>& ports, float timeoutValue) {
     std::vector<int> open_ports;
     std::unordered_set<int> scanned_ports;
@@ -550,6 +596,11 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
     return open_ports;
 }
 
+/**
+ * Sends an ICMP Echo Request ("ping") to determine if a host is up.
+ * @param ipValue Target IP address.
+ * @return True if the host replies to the ping, false otherwise.
+ */
 bool IsHostUpICMP(const std::string& ipValue) {
 
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
@@ -593,6 +644,12 @@ bool IsHostUpICMP(const std::string& ipValue) {
     return received > 0;
 }
 
+/**
+ * Sends an ARP request at Layer 2 to determine if a host is up on a local network.
+ * @param ipValue Target IP address.
+ * @param interface Network interface to use (e.g., "eth0").
+ * @return True if the ARP reply is received, false otherwise.
+ */
 bool IsHostUpARP(const std::string& ipValue, const std::string& interface) {
     int sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
     if (sockfd < 0) {
@@ -682,13 +739,25 @@ bool IsHostUpARP(const std::string& ipValue, const std::string& interface) {
     return false;
 }
 
-
+/**
+ * Checks whether a given string is a valid IPv4 address.
+ * @param ipValue IP address string.
+ * @return True if valid IPv4, false otherwise.
+ */
 bool IsValidIP(const std::string& ipValue) {
     sockaddr_in addr;
 
     return inet_pton(AF_INET, ipValue.c_str(), &(addr.sin_addr)) == 1;
 }
 
+/**
+ * Executes a Lua script with injected global variables: target_ip and target_port.
+ * Useful for scripting post-scan actions like banner parsing, service detection, etc.
+ * @param scriptPath Path to the Lua script.
+ * @param targetIP IP address to pass to the script.
+ * @param port Port number to pass to the script.
+ * @return True if script executed successfully, false otherwise.
+ */
 bool RunLuaScript(const std::string& scriptPath, const std::string& targetIP, int port) {
     lua_State* L = luaL_newstate();
     luaL_openlibs(L);

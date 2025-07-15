@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
     bool enableFindService = false;
     bool enableTCPScan = false;
     bool enableARPScan = false;
-    bool enableNSEScan = false;
+    bool enableLUA = false;
 
     std::string networkInterface;
 
@@ -57,12 +57,12 @@ int main(int argc, char* argv[]) {
 
     RenderBanner();
 
-    // Check and process program arguments
+    // --- Argument Parsing ---
     for (int i = 1; i < argc; ++i) {
 
         std::string arg = argv[i];
 
-        // Prepare the argument that handles IPs.
+        // Parse IPs (individual, comma-separated, or CIDR notation)
         if ((arg == "-i" || arg == "--ip") && i + 1 < argc) {
 
             std::string IPValue = argv[++i];
@@ -111,7 +111,7 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
-        // Prepare the argument that handles ports.
+        // Parse ports (single, range, or list)
         } else if ((arg == "-p" || arg == "--ports") && i + 1 < argc) {
             std::string portValue = argv[++i];
             std::stringstream ss(portValue);
@@ -142,16 +142,15 @@ int main(int argc, char* argv[]) {
                 portsToScan.push_back(std::stoi(portValue));
             }
         
-        // Prepare the argument that handles timeouts.
-        // All the timeout values are defined in seconds.
+        // Set timeout delay (in seconds)
         } else if ((arg == "-d" || arg == "--delay") && i + 1 < argc) {
             portScan_timeout = std::stoi(argv[++i]);
 
-        // Prepare the argument that enables service scanning.
+        // Enable service banner grabbing
         } else if (arg == "-S" || arg == "--service") {
             enableFindService = true;
 
-        // Prepare the argument that handles the top ports.
+        // Use top X most common ports
         } else if ((arg == "-Tp" || arg == "--top-ports") && i + 1 < argc) {
             std::string portQuantArg = argv[++i];
 
@@ -161,7 +160,7 @@ int main(int argc, char* argv[]) {
             int portAmount = std::stoi(portQuantArg);
             portsToScan.assign(common_ports_thousand.begin(), common_ports_thousand.begin() + std::min(portAmount, (int)common_ports_thousand.size()));
 
-        // Add all known TCP ports to the "ports" variable to scan them.
+        // Scan all 65535 TCP ports
         } else if (arg == "-Ap" || arg == "--all-ports") {
             std::vector<int> allTcpPorts;
 
@@ -170,32 +169,34 @@ int main(int argc, char* argv[]) {
 
             portsToScan = allTcpPorts;
 
-        // Performs TCP scan
+        // Enable TCP connect scan
         } else if (arg == "-Ts" || arg == "--tcp-scan") {
             enableTCPScan = true;
 
-        // Performs ARP scan
+        // Enable ARP host discovery
         } else if (arg == "Ar" || arg == "--arp-scan") {
             enableARPScan = true;
 
+        // Set network interface for ARP scan
         } else if ((arg == "--interface") && i + 1 < argc) {
             networkInterface = argv[++i];
 
-        // Set the amount of threads to be used
+        // Set custom thread count
         } else if ((arg == "-Th" || arg == "--threads") && i + 1 < argc) {
             threadAmount = std::stoi(argv[++i]);
 
-        } else if ((arg == "-N" || arg == "--nse-script") && i + 1 < argc) {
-            enableNSEScan = true;
+        // Add Lua script to run
+        } else if ((arg == "-L" || arg == "--lua-script") && i + 1 < argc) {
+            enableLUA = true;
             std::string scriptPath = argv[++i];
             luaScripts.push_back(scriptPath);
 
-        // Print the help section
+        // Print help section
         } else if (arg == "-h" || arg == "--help") {
             RenderHelp();
             return 1;
 
-        // If no valid argument was passed, exit.
+        // Unknown argument fallback
         } else {
             logsys.Warning("Unknown argument was passed.");
             logsys.Info("Usage: hugin -i <IP> -p <PORT(s)> <options>");
@@ -203,6 +204,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // --- Host Discovery Phase ---
     for (const HostInstance& HostObject : HostInstances) {
         if (!IsValidIP(HostObject.ipValue)) {
             logsys.Warning("Invalid address was provided.");
@@ -231,11 +233,13 @@ int main(int argc, char* argv[]) {
 
     logsys.Info("Using a total of", threadAmount, "threads for the scan.");
 
+    // --- Port Scanning Phase ---
     for (HostInstance& HostObject : HostInstances) {
         auto pOpenPorts = &HostObject.openPorts;
 
         logsys.Info("Scanning for open ports on host", HostObject.ipValue);
 
+        // TCP connect scan (parallelized)
         if (enableTCPScan) {
             for (int port : portsToScan) {
                 pool.enqueue([=, &result_mutex, &scannedPortsCount, &isHostUp]() {
@@ -249,11 +253,13 @@ int main(int argc, char* argv[]) {
                 });
             }
 
+            // Wait for all ports to be scanned
             while (scannedPortsCount.load() < portsToScan.size())
                 ts.SleepMilliseconds(500);
 
             scannedPortsCount = 0;
         } else {
+            // TCP SYN scan (batch-based)
             std::vector<int> openPort = PortScanSyn(HostObject.ipValue, portsToScan, portScan_timeout);
 
             logsys.Info("Scanning", portsToScan.size(), "ports via SYN.");
@@ -272,17 +278,19 @@ int main(int argc, char* argv[]) {
         if (!isHostUp)
             logsys.Warning("No open ports were found, is the host online?");
 
-        if (enableFindService || enableNSEScan && !(HostObject.openPorts.empty())) {
+        // --- Service and NSE Scanning Phase ---   
+        if (enableFindService || enableLUA && !(HostObject.openPorts.empty())) {
             logsys.Info("Starting service scanner on host", HostObject.ipValue);
             
             std::cout << std::left;
             std::cout << std::setw(12) << "PORT" << std::setw(8) << "STATE" << "SERVICE/VERSION\n";
             for (int port : HostObject.openPorts) {
-                if (!enableNSEScan) {
-                    // If the service is FTP, increase wait time to grab header
+                if (!enableLUA) {
+                    // Adjust timeout for FTP services
                     if (FindIn(common_ftp_ports, port))
                         servScan_timeout = 12;
         
+                    // Grab service banner in parallel
                     pool.enqueue([&, port]() {
                         std::string s_service_banner;
                         bool isPortOpen = true;
@@ -302,12 +310,14 @@ int main(int argc, char* argv[]) {
                         scannedServicesCount++;
                     });
                 } else {
+                    // Run Lua scripts
                     for (const std::string& script : luaScripts) {
                         logsys.Info("Running script", script, "on", HostObject.ipValue, "port", port);
                         RunLuaScript(script, HostObject.ipValue, port);
                     }
                 }
             }
+            // Wait for service scanning to finish
             while (scannedServicesCount.load() < HostObject.openPorts.size())
                 ts.SleepMilliseconds(500);
 
@@ -316,6 +326,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // --- Scan Summary ---
     auto scanEndTime = std::chrono::steady_clock::now();
     auto scanElapsedTime = std::chrono::duration_cast<std::chrono::seconds>(scanEndTime - scanStartTime).count();
 

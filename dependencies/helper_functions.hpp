@@ -36,6 +36,9 @@
 // Custom libraries
 #include "../dependencies/log_system.h"
 
+/**
+ * @brief Utility structure to sleep for a given number of milliseconds.
+ */
 struct ThreadSleep {
     void SleepMilliseconds(int value) {
         return std::this_thread::sleep_for(std::chrono::milliseconds(value));
@@ -43,6 +46,9 @@ struct ThreadSleep {
 };
 ThreadSleep ts;
 
+/**
+ * @brief A simple thread pool to run asynchronous tasks in parallel.
+ */
 class ThreadPool {
 public:
     ThreadPool(size_t num_threads) : stop(false) {
@@ -90,6 +96,11 @@ private:
     bool stop;
 };
 
+/**
+ * @brief Checks if a given string is a valid integer.
+ * @param str The input string.
+ * @return True if the string is a valid integer, false otherwise.
+ */
 bool isInteger(const std::string& str) {
     std::istringstream iss(str);
     int num;
@@ -108,6 +119,12 @@ bool isInteger(const std::string& str) {
     return true;
 }
 
+/**
+ * @brief Searches for a value in a vector.
+ * @param list Vector of integers.
+ * @param buf Integer to search for.
+ * @return True if found, false otherwise.
+ */
 bool FindIn(std::vector<int>& list, int buf) {
 
     if (std::find(list.begin(), list.end(), buf) == list.end())
@@ -116,6 +133,11 @@ bool FindIn(std::vector<int>& list, int buf) {
     return true;
 }
 
+/**
+ * @brief Reads a file line-by-line and extracts integers from it.
+ * @param filename Path to the file.
+ * @return Vector of integers read from the file.
+ */
 std::vector<int> ReadFile(const std::string& filename) {
     std::vector<int> output;
     std::ifstream file(filename);
@@ -136,11 +158,4 @@ std::vector<int> ReadFile(const std::string& filename) {
     }
 
     return output;
-}
-
-std::vector<uint8_t> hexToBytes(const std::string& hex) {
-    std::vector<uint8_t> bytes;
-    for (size_t i = 0; i < hex.length(); i += 2)
-        bytes.push_back(static_cast<uint8_t>(strtol(hex.substr(i, 2).c_str(), nullptr, 16)));
-    return bytes;
 }

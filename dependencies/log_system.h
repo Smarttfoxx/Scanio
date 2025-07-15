@@ -25,6 +25,9 @@
 
 #include <iostream>
 
+/**
+ * @brief Simple logging utility to format and label output messages.
+ */
 struct LogSystem {
     template<typename... Args>
     void Error(const char* message, Args&&... args) {
