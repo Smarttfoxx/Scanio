@@ -11,7 +11,7 @@
 - ICMP ping to check if a host is online before scanning
 - Optional banner grabbing to identify services on open ports
 - Raw socket support for SYN scanning (requires root access)
-- Scan multiple IPs and subnets at once.
+- Scan multiple IPs and subnets at once
 
 ---
 
