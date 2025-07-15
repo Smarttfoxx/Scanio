@@ -1,17 +1,17 @@
 # Hugin - Network Scanner
 
-**Hugin** is a high-performance, multithreaded port scanner written in C++. It supports both TCP Connect and SYN scanning modes, features ICMP host detection, optional service/banner grabbing, and provides real-time scan progress with estimated time remaining. It is built for speed, efficiency, and flexibility, making it a powerful tool for network reconnaissance.
+**Hugin** is a high-performance, multithreaded port scanner written in C++. It supports both TCP Connect and SYN scanning modes, features ICMP host detection, optional service/banner grabbing. It is built for speed, efficiency, and flexibility, making it a powerful tool for network reconnaissance. Hugin can scan all 65535 ports in 3 seconds.
 
 ---
 
 ## Features
 
 - Scan specific ports, top common ports, or all 65535 ports
-- High-speed multithreaded architecture using a custom thread pool
+- High-speed multithreaded architecture
 - ICMP ping to check if a host is online before scanning
 - Optional banner grabbing to identify services on open ports
-- Live progress tracking with estimated time of arrival (ETA)
 - Raw socket support for SYN scanning (requires root access)
+- Scan multiple IPs and subnets at once
 
 ---
 
@@ -20,7 +20,7 @@
 ### Requirements
 
 - C++20 or later
-- Linux (raw sockets and ICMP scanning rely on POSIX features)
+- Linux
 
 ### Compilation
 
