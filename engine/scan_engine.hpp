@@ -68,6 +68,8 @@ extern "C" {
 #define LDAP_DEPRECATED 1
 #include <ldap.h>
 
+#include <ldns/ldns.h>
+
 // Custom libraries
 #include "default_ports.h"
 #include "../dependencies/helper_functions.hpp"
@@ -252,7 +254,7 @@ bool EnumerateLDAP(const std::string& host, int port) {
         stream << std::left 
                << std::setw(12) << (std::to_string(port) + "/tcp")
                << std::setw(8) << "open"
-               << "Microsoft Windows Active Directory LDAP (Domain: " << domainFlat << "" << dcHost;
+               << "Microsoft Windows Active Directory LDAP (Domain: " << domainFlat << " " << dcHost;
 
         if (!site.empty())
             stream << ", Site: " << site;
@@ -267,6 +269,213 @@ bool EnumerateLDAP(const std::string& host, int port) {
 }
 
 /**
+ * Performs a reverse DNS lookup to get hostname
+ * @param ipValue Target IP
+ * @return Hostname or empty string if not found
+ */
+std::string GetReverseDNS(const std::string& ipValue) {
+    sockaddr_in addr{};
+    inet_pton(AF_INET, ipValue.c_str(), &addr.sin_addr);
+    
+    char host[NI_MAXHOST];
+    if (getnameinfo((sockaddr*)&addr, sizeof(addr), host, NI_MAXHOST, nullptr, 0, 0) == 0) {
+        return std::string(host);
+    }
+    return "";
+}
+
+/**
+ * TCP service probe for DNS
+ */
+std::string TCPServiceProbe(const std::string& ipValue, int port) {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) return "";
+    
+    struct timeval timeout;
+    timeout.tv_sec = 2;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, ipValue.c_str(), &addr.sin_addr);
+    
+    if (connect(sockfd, (sockaddr*)&addr, sizeof(addr))) {
+        close(sockfd);
+        return "";
+    }
+    
+    // DNS-specific TCP probe
+    if (port == 53) {
+        // Send DNS query over TCP
+        uint16_t len = htons(12); // Simple DNS header
+        char query[14] = {0};
+        memcpy(query, &len, 2);
+        query[2] = 0x12; query[3] = 0x34; // ID
+        query[4] = 0x01; query[5] = 0x00; // Standard query
+        query[6] = 0x00; query[7] = 0x01; // Questions
+        query[8] = 0x00; query[9] = 0x00; // Answer RRs
+        query[10] = 0x00; query[11] = 0x00; // Authority RRs
+        query[12] = 0x00; query[13] = 0x00; // Additional RRs
+        
+        send(sockfd, query, 14, 0);
+    }
+    
+    // Read response
+    char buffer[1024];
+    ssize_t bytes = recv(sockfd, buffer, sizeof(buffer), 0);
+    close(sockfd);
+    
+    if (bytes <= 0) return "";
+    
+    // Analyze response for DNS
+    if (port == 53) {
+        // Check for DNS response format
+        if (bytes > 2) {
+            uint16_t length;
+            memcpy(&length, buffer, 2);
+            length = ntohs(length);
+            
+            if (length == bytes - 2) {
+                return "DNS over TCP";
+            }
+        }
+    }
+    
+    // Check for common banners
+    std::string response(buffer, bytes);
+    if (response.find("BIND") != std::string::npos) {
+        return "ISC BIND";
+    } else if (response.find("dnsmasq") != std::string::npos) {
+        return "dnsmasq";
+    }
+    
+    return "Unknown TCP response";
+}
+
+/**
+ * Enhanced DNS Service: detection
+ * @param ipValue Target DNS server IP
+ * @param port DNS server port
+ * @return Detailed service string
+ */
+std::string DetectDNSService(const std::string& ipValue, int port) {
+    std::stringstream result;
+
+    // Initialize ldns
+    ldns_resolver* resolver = nullptr;
+    ldns_rdf* rdf = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_A, ipValue.c_str());
+    if (!rdf) return "DNS Service: (Could not parse IP)";
+
+    if (ldns_resolver_new_frm_file(&resolver, nullptr) != LDNS_STATUS_OK) {
+        ldns_rdf_free(rdf);
+        return "DNS Service: (Resolver init failed)";
+    }
+
+    ldns_resolver_push_nameserver(resolver, rdf); // fixed
+    ldns_resolver_set_port(resolver, port);
+    ldns_resolver_set_retry(resolver, 1);
+
+    struct timeval tv{2, 0};  // fixed
+    ldns_resolver_set_timeout(resolver, tv);
+
+    // Get reverse DNS
+    std::string hostname = GetReverseDNS(ipValue);
+    if (!hostname.empty()) {
+        result << "DNS Service: (Hostname: " << hostname << ")";
+    } else {
+        result << "DNS Service:";
+    }
+
+    // Try various version queries
+    std::vector<std::pair<std::string, uint16_t>> queries = {
+        {"version.bind", LDNS_RR_TYPE_TXT},
+        {"version.server", LDNS_RR_TYPE_TXT},
+        {"hostname.bind", LDNS_RR_TYPE_TXT},
+        {"id.server", LDNS_RR_TYPE_TXT},
+    };
+
+    std::string version;
+    for (const auto& query : queries) {
+        ldns_rdf* name = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_DNAME, query.first.c_str());
+        if (!name) continue;
+
+        ldns_pkt* pkt = ldns_resolver_query(resolver, name, static_cast<ldns_rr_type>(query.second),
+                                            LDNS_RR_CLASS_CH, LDNS_RD); // fixed class
+        ldns_rdf_free(name);
+
+        if (!pkt) continue;
+
+        if (ldns_pkt_ancount(pkt)) {  // fixed missing ')'
+            ldns_rr_list* answers = ldns_pkt_answer(pkt);
+            for (size_t i = 0; i < ldns_rr_list_rr_count(answers); i++) {
+                ldns_rr* rr = ldns_rr_list_rr(answers, i);
+                if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_TXT) {
+                    for (size_t j = 0; j < ldns_rr_rd_count(rr); j++) {
+                        ldns_rdf* txt = ldns_rr_rdf(rr, j);
+                        if (txt) {
+                            char* str = ldns_rdf2str(txt);
+                            if (str) {
+                                version = str;
+                                free(str);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        ldns_pkt_free(pkt);
+        if (!version.empty()) break;
+    }
+
+    // TCP fallback
+    if (version.empty()) {
+        std::string banner = TCPServiceProbe(ipValue, port);
+        if (!banner.empty()) {
+            version = banner;
+        }
+    }
+
+    // Analyze version string
+    if (!version.empty()) {
+        version.erase(std::remove(version.begin(), version.end(), '"'), version.end());
+
+        if (version.find("BIND") != std::string::npos) {
+            size_t bind_pos = version.find("BIND ");
+            if (bind_pos != std::string::npos) {
+                std::string bind_version = version.substr(bind_pos + 5);
+                size_t space_pos = bind_version.find(' ');
+                if (space_pos != std::string::npos) {
+                    bind_version = bind_version.substr(0, space_pos);
+                }
+                result << " ISC BIND " << bind_version;
+                if (version.find("Debian") != std::string::npos) {
+                    result << " (Debian Linux)";
+                }
+            }
+        } else if (version.find("dnsmasq") != std::string::npos) {
+            result << " dnsmasq";
+        } else if (version.find("Microsoft") != std::string::npos) {
+            result << " Microsoft DNS";
+        } else {
+            result << " " << version;
+        }
+    }
+
+    if (version.find("Debian") != std::string::npos) {
+        result << "\nService Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel";
+    }
+
+    ldns_resolver_deep_free(resolver);
+    ldns_rdf_free(rdf);
+
+    return result.str();
+}
+
+/**
  * Connects to a TCP port and attempts to grab a service banner.
  * @param ipValue IP address of the target.
  * @param port Target port number.
@@ -275,6 +484,13 @@ bool EnumerateLDAP(const std::string& host, int port) {
  */
 std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeoutValue) {
     std::string banner;
+    char buffer[1024];
+    auto start = std::chrono::steady_clock::now();
+
+    // Handle DNS Service: specifically
+    if (port == 53) {
+        return DetectDNSService(ipValue, port);
+    }
 
     if (FindIn(common_ldap_ports, port))
         EnumerateLDAP(ipValue, port);
@@ -324,26 +540,29 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
         send(sockfd, send_head, strlen(send_head), 0);
     }
 
-    char buffer[1024];
-    auto start = std::chrono::steady_clock::now();
-
     while (true)
     {
         int bytes = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
 
-        if (bytes > 0)
-            banner.assign(buffer, bytes);
-
+        if (bytes > 0) {
+            banner.clear();
+            for (int i = 0; i < bytes; ++i) {
+                if (isprint(static_cast<unsigned char>(buffer[i])) || buffer[i] == '\n')
+                    banner += buffer[i];
+            }
+        }
+        
         // Handle web services
         if (std::find(common_web_ports.begin(), common_web_ports.end(), port) != common_web_ports.end()) {
             std::string banner_lower = banner;
-            std::transform(banner_lower.begin(), banner_lower.end(), banner_lower.begin(), [](unsigned char c) { return std::tolower(c); });
+            std::transform(banner_lower.begin(), banner_lower.end(), banner_lower.begin(), 
+            [](unsigned char c) { return std::tolower(c); });
 
             size_t pos = banner_lower.find("server: ");
 
             if (pos != std::string::npos)  {
                 size_t start = pos + 8;
-                size_t end = banner.find("\r\n", start);
+                size_t end = banner.find("\n", start);
                 
                 if (end != std::string::npos) 
                     banner = banner.substr(start, end - start);
@@ -351,7 +570,7 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
                     banner = banner.substr(start);
             }
         }
-
+        
         // Handle FTP
         if (std::find(common_ftp_ports.begin(), common_ftp_ports.end(), port) != common_ftp_ports.end()) {
             size_t pos = banner.find("220 ");
@@ -371,14 +590,6 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
         // Handle DCE/RPC
         if (port == 135 && (uint8_t)buffer[0] == 0x05 && buffer[1] == 0x00)
             banner = "Microsoft Windows RPC";
-
-        // NetBIOS
-        else if (port == 139 && (uint8_t)buffer[0] == 0x82)
-            banner = "Microsoft NetBios Session Service";
-
-        // Handle SMB
-        else if (port == 445 && bytes >= 4 && (uint8_t)buffer[4] == 0xFF && buffer[5] == 'S' && buffer[6] == 'M' && buffer[7] == 'B')
-            banner = "Microsoft SMB Service";
 
         auto elapsed = std::chrono::steady_clock::now() - start;
         if (elapsed > std::chrono::seconds(timeoutValue))
