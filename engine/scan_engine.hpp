@@ -252,14 +252,13 @@ bool EnumerateLDAP(const std::string& host, int port) {
         stream << std::left 
                << std::setw(12) << (std::to_string(port) + "/tcp")
                << std::setw(8) << "open"
-               << "ldap - Microsoft Windows Active Directory LDAP (Domain: " << domainFlat;
+               << "Microsoft Windows Active Directory LDAP (Domain: " << domainFlat << "" << dcHost;
 
         if (!site.empty())
             stream << ", Site: " << site;
         stream << ")";
 
         logsys.CommonText(stream.str().c_str());
-        logsys.CommonText("Service Info: Host:", dcHost.empty() ? "Unknown" : dcHost, "; OS: Windows; CPE: cpe:/o:microsoft:windows");
 
         return true;
     }
@@ -275,7 +274,9 @@ bool EnumerateLDAP(const std::string& host, int port) {
  * @return Banner string or empty if none was received.
  */
 std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeoutValue) {
-    if (port == 389 || port == 636 || port == 3268 || port == 3269)
+    std::string banner;
+
+    if (FindIn(common_ldap_ports, port))
         EnumerateLDAP(ipValue, port);
     
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -298,16 +299,32 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
         return "";
     }
 
-    // If the port is a known web port, send a HEAD request.
-    // The HEAD request will make us receive the server information.
+    // MSRPC
+    if (port == 135) {
+        const uint8_t msrpcProbe[] = {
+            0x05, 0x00, 0x0b, 0x03, 0x10, 0x00, 0x00, 0x00,
+            0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        };
+        send(sockfd, msrpcProbe, sizeof(msrpcProbe), 0);
+    }
+
+    // NetBIOS
+    if (port == 139) {
+        banner = "Microsoft Windows Netbios";
+    }
+
+    // Port 445
+    if (port == 445) {
+        banner = "Microsoft Windows SMB Service";
+    }
+
+    // Web services
     if (std::find(common_web_ports.begin(), common_web_ports.end(), port) != common_web_ports.end()) {
         const char* send_head = "HEAD / HTTP/1.0\r\n\r\n";
         send(sockfd, send_head, strlen(send_head), 0);
     }
 
-    std::string banner;
     char buffer[1024];
-
     auto start = std::chrono::steady_clock::now();
 
     while (true)
@@ -315,13 +332,9 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
         int bytes = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
 
         if (bytes > 0)
-        {
-            buffer[bytes] = '\0';
-            banner += buffer;
-        }
+            banner.assign(buffer, bytes);
 
-        // If the port is a known web port receives its response
-        // Transform the entire response in lowercase to filter it.
+        // Handle web services
         if (std::find(common_web_ports.begin(), common_web_ports.end(), port) != common_web_ports.end()) {
             std::string banner_lower = banner;
             std::transform(banner_lower.begin(), banner_lower.end(), banner_lower.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -339,9 +352,7 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
             }
         }
 
-        // If the port is a known FTP port, filter the response.
-        // This will give us only the FTP service information.
-        // That information is available in the header.
+        // Handle FTP
         if (std::find(common_ftp_ports.begin(), common_ftp_ports.end(), port) != common_ftp_ports.end()) {
             size_t pos = banner.find("220 ");
 
@@ -356,6 +367,18 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
                     banner = banner.substr(start);
             }
         }
+
+        // Handle DCE/RPC
+        if (port == 135 && (uint8_t)buffer[0] == 0x05 && buffer[1] == 0x00)
+            banner = "Microsoft Windows RPC";
+
+        // NetBIOS
+        else if (port == 139 && (uint8_t)buffer[0] == 0x82)
+            banner = "Microsoft NetBios Session Service";
+
+        // Handle SMB
+        else if (port == 445 && bytes >= 4 && (uint8_t)buffer[4] == 0xFF && buffer[5] == 'S' && buffer[6] == 'M' && buffer[7] == 'B')
+            banner = "Microsoft SMB Service";
 
         auto elapsed = std::chrono::steady_clock::now() - start;
         if (elapsed > std::chrono::seconds(timeoutValue))

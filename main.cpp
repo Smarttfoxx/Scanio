@@ -278,7 +278,7 @@ int main(int argc, char* argv[]) {
         if (!isHostUp)
             logsys.Warning("No open ports were found, is the host online?");
 
-        // --- Service and NSE Scanning Phase ---   
+        // --- Service and LUA Scanning Phase ---   
         if (enableFindService || enableLUA && !(HostObject.openPorts.empty())) {
             logsys.Info("Starting service scanner on host", HostObject.ipValue);
             
