@@ -21,73 +21,7 @@
 * and you are welcome to redistribute it under certain conditions.
 */
 
-#pragma once
-
-// Support for lua scripting
-extern "C" {
-#include <lua.h>
-#include <lualib.h>
-#include <lauxlib.h>
-}
-
-// C++ libraries
-#include <vector>
-#include <unordered_set>
-#include <unordered_map>
-#include <chrono>
-#include <thread>
-#include <cstring>
-#include <string>
-#include <fcntl.h>
-#include <unistd.h>
-#include <iostream>
-#include <errno.h>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
-#include <cctype>
-#include <atomic>
-
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <netinet/ip.h>
-#include <netinet/in.h>
-#include <netinet/ip_icmp.h>
-#include <netinet/tcp.h>
-#include <net/ethernet.h>
-#include <netpacket/packet.h>
-#include <net/if.h>
-#include <net/if_arp.h>
-#include <netinet/if_ether.h>
-
-#include <sys/socket.h>
-#include <sys/epoll.h>
-#include <sys/time.h>
-#include <sys/ioctl.h>
-
-#define LDAP_DEPRECATED 1
-#include <ldap.h>
-
-#include <ldns/ldns.h>
-
-// Custom libraries
-#include "default_ports.h"
-#include "../dependencies/helper_functions.hpp"
-
-struct HostInstance {
-    const std::string ipValue;
-    std::vector<int> openPorts;
-
-    HostInstance(const std::string& ip) : ipValue(ip){};
-};
-
-struct pseudo_header {
-    uint32_t sourceIP;
-    uint32_t targetIP;
-    uint8_t placeholder;
-    uint8_t protocol;
-    uint16_t tcp_length;
-};
+#include "scan_engine.h"
 
 /**
  * Calculates the Internet checksum for a buffer of bytes.
@@ -155,7 +89,11 @@ std::string GetLocalIP(const std::string& ipValue) {
     dest_addr.sin_port = htons(53);
 
     inet_pton(AF_INET, ipValue.c_str(), &dest_addr.sin_addr);
-    connect(sockfd, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+
+    if (connect(sockfd, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
+        close(sockfd);
+        return "";
+    }
 
     struct sockaddr_in local_addr = {};
     socklen_t addr_len = sizeof(local_addr);
@@ -301,7 +239,7 @@ std::string TCPServiceProbe(const std::string& ipValue, int port) {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, ipValue.c_str(), &addr.sin_addr);
     
-    if (connect(sockfd, (sockaddr*)&addr, sizeof(addr))) {
+    if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) < 0) {
         close(sockfd);
         return "";
     }
@@ -609,6 +547,90 @@ std::string ServiceBannerGrabber(const std::string& ipValue, int port, int timeo
     return !banner.empty() ? banner : "";
 }
 
+std::unordered_map<int, std::string> ParseSelectedUDPProbes(
+    const std::string& filePath,
+    const std::unordered_set<int>& targetPorts
+) {
+    std::ifstream infile(filePath);
+    std::unordered_map<int, std::string> udpProbes;
+
+    std::string line;
+    while (std::getline(infile, line)) {
+        if (line.empty() || line[0] == '#') continue;
+
+        std::istringstream iss(line);
+        std::string proto;
+        int port;
+        std::string hexPayload;
+
+        iss >> proto >> port;
+        std::getline(iss, hexPayload);
+        if (proto != "udp" || !targetPorts.count(port)) continue;
+
+        hexPayload.erase(0, hexPayload.find_first_not_of(" \t"));
+        std::string payload;
+        for (size_t i = 0; i < hexPayload.size();) {
+            if (hexPayload[i] == '\\' && hexPayload[i + 1] == 'x') {
+                payload += static_cast<char>(std::stoi(hexPayload.substr(i + 2, 2), nullptr, 16));
+                i += 4;
+            } else {
+                payload += hexPayload[i++];
+            }
+        }
+        udpProbes[port] = payload;
+    }
+    return udpProbes;
+}
+
+std::string SendUDPProbe(const std::string& ip, int port, const std::string& payload, int timeoutSeconds = 5) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) return "";
+
+    // Bind to source port 5353 (commonly used by Nmap)
+    sockaddr_in src{};
+    src.sin_family = AF_INET;
+    src.sin_port = htons(1337);
+    src.sin_addr.s_addr = INADDR_ANY;
+    if (bind(sock, (sockaddr*)&src, sizeof(src)) < 0) {
+        perror("[ERROR] bind failed");
+    }
+
+    struct timeval tv { timeoutSeconds, 0 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    sockaddr_in target{};
+    target.sin_family = AF_INET;
+    target.sin_port = htons(port);
+    inet_pton(AF_INET, ip.c_str(), &target.sin_addr);
+
+    // Send the payload
+    ssize_t sentBytes = sendto(sock, payload.data(), payload.size(), 0,
+                           (struct sockaddr*)&target, sizeof(target));
+
+    if (sentBytes != (int)payload.size()) {
+        std::cerr << "[ERROR] Failed to send full UDP payload to port " << port << "\n";
+    }
+
+    if (sentBytes > 0) {
+        std::cout << "[DEBUG] Sent " << sentBytes << " bytes to " << ip << ":" << port << "\n";
+    }
+
+    // Wait for response
+    char buffer[2048];
+    socklen_t len = sizeof(target);
+    ssize_t bytes = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&target, &len);
+
+    close(sock);
+
+    if (bytes > 0) {
+        std::cout << "[DEBUG] Received " << bytes << " bytes from " << ip << ":" << port << "\n";
+        return std::string(buffer, bytes);
+    } else {
+        std::cout << "[DEBUG] no bytes received\n";
+    }
+    return "";
+}
+
 /**
  * Checks if a TCP port is open by attempting a full connection.
  * @param ipValue IP address of the target.
@@ -706,7 +728,11 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
         tmp_dst.sin_port = htons(53);
 
         inet_pton(AF_INET, ipValue.c_str(), &tmp_dst.sin_addr);
-        connect(tmp_sock, (sockaddr*)&tmp_dst, sizeof(tmp_dst));
+        
+        if (connect(tmp_sock, (sockaddr*)&tmp_dst, sizeof(tmp_dst)) < 0) {
+            close(tmp_sock);
+            return {};
+        }
 
         sockaddr_in local_addr{};
         socklen_t len = sizeof(local_addr);
@@ -791,8 +817,6 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
         for (int i = 0; i < nfds; ++i) {
             if (events[i].data.fd == raw_sock) {
                 char buffer[4096];
-                sockaddr_in sender{};
-                socklen_t sender_len = sizeof(sender);
                 
                 while (true) {
                     sockaddr_in sender{};
@@ -809,7 +833,7 @@ std::vector<int> PortScanSyn(const std::string& ipValue, const std::vector<int>&
                     if (iph->protocol != IPPROTO_TCP) continue;
 
                     int ip_header_len = iph->ihl * 4;
-                    if (len < ip_header_len + sizeof(tcphdr)) continue;
+                    if (len < ip_header_len + static_cast<int>(sizeof(tcphdr))) continue;
 
                     struct tcphdr *tcph = (struct tcphdr *)(buffer + ip_header_len);
 

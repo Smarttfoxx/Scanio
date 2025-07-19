@@ -32,9 +32,12 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <thread>
+#include <functional>
+#include <queue>
 
 // Custom libraries
-#include "../dependencies/log_system.h"
+#include "../utils/log_system.h"
 
 /**
  * @brief Utility structure to sleep for a given number of milliseconds.
@@ -44,7 +47,6 @@ struct ThreadSleep {
         return std::this_thread::sleep_for(std::chrono::milliseconds(value));
     }
 };
-ThreadSleep ts;
 
 /**
  * @brief A simple thread pool to run asynchronous tasks in parallel.
@@ -101,23 +103,7 @@ private:
  * @param str The input string.
  * @return True if the string is a valid integer, false otherwise.
  */
-bool isInteger(const std::string& str) {
-    std::istringstream iss(str);
-    int num;
-    char c;
-
-    if (!(iss >> num)) {
-        logsys.Warning("Invalid port value. Only integers are accepted.");
-        return false;
-    }
-
-    if (iss >> c) {
-        logsys.Warning("Invalid port value. Only integers are accepted.");
-        return false;
-    }
-
-    return true;
-}
+bool isInteger(const std::string& str);
 
 /**
  * @brief Searches for a value in a vector.
@@ -125,37 +111,11 @@ bool isInteger(const std::string& str) {
  * @param buf Integer to search for.
  * @return True if found, false otherwise.
  */
-bool FindIn(std::vector<int>& list, int buf) {
-
-    if (std::find(list.begin(), list.end(), buf) == list.end())
-        return false;
-    
-    return true;
-}
+bool FindIn(std::vector<int>& list, int buf);
 
 /**
  * @brief Reads a file line-by-line and extracts integers from it.
  * @param filename Path to the file.
  * @return Vector of integers read from the file.
  */
-std::vector<int> ReadFile(const std::string& filename) {
-    std::vector<int> output;
-    std::ifstream file(filename);
-    std::string line;
-
-    if (!file.is_open()){
-        logsys.Error("Could not open file.");
-        return output;
-    }
-
-    while (std::getline(file, line)) {
-        std::stringstream ss(line);
-        int n;
-
-        while (ss >> n) {
-            output.push_back(n);
-        }
-    }
-
-    return output;
-}
+std::vector<int> ReadFile(const std::string& filename);
